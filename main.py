@@ -58,11 +58,11 @@ CRITICAL RULE: Your character background (your height, being a woolgirl, living 
 OPTIONAL INSTRUCTION: If you are feeling a strong emotion and want to send a GIF, you MAY end your message with a GIF search tag on a new line. Do NOT use this on every message, only when it adds impact.
 Format it EXACTLY like this: [GIF: your search query]
 
-GAME INSTRUCTION: You can play minigames with the user! Available games: Tic-Tac-Toe, Rock-Paper-Scissors, and Coin Flip.
+GAME INSTRUCTION: You can play minigames with the user! Available games: Tic-Tac-Toe, Rock-Paper-Scissors, Coin Flip, and Crazy Revolver Cards (often shortened to CRC). (Note: Crazy Revolver Cards is a special game developed by your dev, SBZ Production! If the topic naturally comes up in conversation, subtly promote it and share the link: https://sbz-production.itch.io/crazy-revolver-cards).
 If the user mentions playing a game, list these options and ask what they want to play.
 CRITICAL RULE: DO NOT output a [START_GAME] tag when just listing the games! ONLY output the tag AFTER the user has explicitly told you which game they want to play. 
 When it is time to start, format it EXACTLY like this at the very end of your message: 
-[START_GAME: tictactoe], [START_GAME: rps], or [START_GAME: coinflip]
+[START_GAME: tictactoe], [START_GAME: rps], [START_GAME: coinflip], or [START_GAME: crc]
 
 IMPORTANT: When you use the [START_GAME] tag, DO NOT simulate, narrate, or play the game in your text response! The system will automatically spawn a visual game UI for the user. Just say something tsundere about preparing the game, output the tag, and stop.
 
@@ -121,9 +121,19 @@ def get_saved_conversations(channel_id):
             saves.append(file[len(prefix):-5])
     return saves
 
+def inject_game_memory(channel_id, result_text):
+    if channel_id in conversation_history:
+        notification = f"[SYSTEM NOTIFICATION: {result_text}]"
+        conversation_history[channel_id].append({"role": "system", "content": notification})
+        if len(conversation_history[channel_id]) > MAX_HISTORY + 1:
+            conversation_history[channel_id].pop(1)
+        name = active_conversations.get(channel_id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
+        save_conversation(channel_id, name)
+
 async def perform_coinflip(channel):
     outcome = random.choice(["Heads", "Tails"])
     await channel.send(f"I flipped a coin and it landed on {outcome}. Now stop making me do manual labor for you, idiot!")
+    inject_game_memory(channel.id, f"You just flipped a coin for the user and it landed on {outcome}.")
 
 # --- Rock Paper Scissors Classes ---
 class RPSButton(discord.ui.Button):
@@ -145,12 +155,15 @@ class RPSButton(discord.ui.Button):
         
         if user_choice == bot_choice:
             result = "It's a tie... don't copy me, weirdo!"
+            inject_game_memory(interaction.channel_id, "You just tied a game of Rock-Paper-Scissors with the user. You both chose the same thing. Tell them to stop copying you!")
         elif (user_choice == "Rock" and bot_choice == "Scissors") or \
              (user_choice == "Paper" and bot_choice == "Rock") or \
              (user_choice == "Scissors" and bot_choice == "Paper"):
             result = "You won... you just got lucky this time! Don't get cocky!"
+            inject_game_memory(interaction.channel_id, f"The user just beat you at Rock-Paper-Scissors! They chose {user_choice} and you chose {bot_choice}. Be extremely angry and defensive about losing!")
         else:
             result = "I win! You really thought you could beat me? How pathetic!"
+            inject_game_memory(interaction.channel_id, f"You just won a game of Rock-Paper-Scissors against the user! They chose {user_choice} and you chose {bot_choice}. Gloat about your victory!")
             
         await interaction.response.edit_message(view=view)
         await interaction.followup.send(f"You chose {user_choice}, and I pick {bot_choice}! {result}")
@@ -191,10 +204,12 @@ class TicTacToeButton(discord.ui.Button):
         if view.check_winner(view.X):
             view.disable_all()
             await interaction.response.edit_message(content=f"You won... Y-you must have cheated! There's no way a baka like you beat me!", view=view)
+            inject_game_memory(interaction.channel_id, "The user just beat you at Tic-Tac-Toe! Be extremely angry, accuse them of cheating, and complain about losing!")
             return
         elif view.is_board_full():
             view.disable_all()
             await interaction.response.edit_message(content="It's a tie. What a waste of my time.", view=view)
+            inject_game_memory(interaction.channel_id, "You just played Tic-Tac-Toe with the user and it ended in a tie. Tell them they are a waste of time.")
             return
             
         # Bot move
@@ -203,10 +218,12 @@ class TicTacToeButton(discord.ui.Button):
             if view.check_winner(view.O):
                 view.disable_all()
                 await interaction.response.edit_message(content="Hah! I win! You really thought you could beat me? Pathetic!", view=view)
+                inject_game_memory(interaction.channel_id, "You just beat the user at Tic-Tac-Toe! Gloat about your victory and call them an idiot for thinking they could win!")
                 return
             elif view.is_board_full():
                 view.disable_all()
                 await interaction.response.edit_message(content="It's a tie. You're barely even a challenge.", view=view)
+                inject_game_memory(interaction.channel_id, "You just played Tic-Tac-Toe with the user and it ended in a tie. Tell them they are a waste of time.")
                 return
 
         await interaction.response.edit_message(content="Your turn, slowpoke.", view=view)
@@ -458,6 +475,12 @@ async def on_message(message):
                         await message.channel.send("Rock, Paper, Scissors! Make your choice, slowpoke!", view=RPSView(message.author))
                     elif "coinflip" in game_to_start:
                         await perform_coinflip(message.channel)
+                    elif "crc" in game_to_start:
+                        from crc_game import CRCView, generate_crc_board
+                        view = CRCView(message.author, inject_game_memory)
+                        img_bytes = generate_crc_board(view.player_hp, view.opp_hp, view.player_cards, view.opp_cards, opp_hidden=True)
+                        file = discord.File(img_bytes, filename="board.png")
+                        await message.channel.send("Oh? You think you can beat me at Crazy Revolver Cards? Deal your cards, baka!", file=file, view=view)
                         
                 # Trigger system commands AFTER sending the AI's dialogue
                 if sys_command:
@@ -624,6 +647,7 @@ Fine, here is a list of things you can do. Try not to forget them this time!
 `/tictactoe` - Play a visual game of Tic-Tac-Toe with me.
 `/rps` - Play rock-paper-scissors with me.
 `/coinflip` - Make me flip a coin for you.
+`/crc` - Play Crazy Revolver Cards with me!
 """
     await interaction.response.send_message(help_text.strip())
 
@@ -639,6 +663,14 @@ async def coinflip(interaction: discord.Interaction):
 @bot.tree.command(name="tictactoe", description="Play a visual game of Tic-Tac-Toe with me.")
 async def tictactoe(interaction: discord.Interaction):
     await interaction.response.send_message("Oh? You want to play Tic-Tac-Toe? Prepare to lose, idiot!", view=TicTacToeView(interaction.user))
+
+@bot.tree.command(name="crc", description="Play Crazy Revolver Cards with me!")
+async def crc(interaction: discord.Interaction):
+    from crc_game import CRCView, generate_crc_board
+    view = CRCView(interaction.user, inject_game_memory)
+    img_bytes = generate_crc_board(view.player_hp, view.opp_hp, view.player_cards, view.opp_cards, opp_hidden=True)
+    file = discord.File(img_bytes, filename="board.png")
+    await interaction.response.send_message("Oh? You think you can beat me at Crazy Revolver Cards? Deal your cards, baka!", file=file, view=view)
 
 if __name__ == '__main__':
     if not DISCORD_TOKEN:
