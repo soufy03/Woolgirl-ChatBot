@@ -272,13 +272,19 @@ async def compress_memory(channel_id):
     if len(history) <= 10:
         return
         
-    messages_to_compress = history[:-5]
+    # The first message is always the SYSTEM_PROMPT.
+    # It might also contain the [LONG TERM MEMORY] appended to it.
+    system_msg = history[0]
+    messages_to_compress = history[1:-5]
     recent_messages = history[-5:]
     
     existing_summary = ""
-    if messages_to_compress and messages_to_compress[0].get('role') == 'system' and '[LONG TERM MEMORY]' in messages_to_compress[0].get('content', ''):
-        existing_summary = messages_to_compress[0]['content']
-        messages_to_compress = messages_to_compress[1:]
+    system_content = system_msg.get('content', '')
+    
+    if '[LONG TERM MEMORY]' in system_content:
+        # Extract the existing summary block
+        parts = system_content.split('[LONG TERM MEMORY]')
+        existing_summary = parts[1].strip()
         
     if not messages_to_compress:
         return
@@ -306,7 +312,11 @@ New Conversation:
             max_tokens=60
         )
         new_summary = response.choices[0].message.content.strip()
-        conversation_history[channel_id] = [{"role": "system", "content": f"[LONG TERM MEMORY]\n{new_summary}"}] + recent_messages
+        
+        # Combine original prompt with new memory
+        combined_system = f"{SYSTEM_PROMPT}\n\n[LONG TERM MEMORY]\n{new_summary}"
+        
+        conversation_history[channel_id] = [{"role": "system", "content": combined_system}] + recent_messages
         name = active_conversations.get(channel_id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
         save_conversation(channel_id, name)
         print(f"Compressed memory for {channel_id}: {new_summary}")
