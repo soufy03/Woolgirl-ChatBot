@@ -133,6 +133,36 @@ def inject_game_memory(channel_id, result_text):
         name = active_conversations.get(channel_id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
         save_conversation(channel_id, name)
 
+async def force_ai_response(channel, system_prompt_addition):
+    import re
+    if channel.id not in conversation_history:
+        conversation_history[channel.id] = []
+    
+    conversation_history[channel.id].append({"role": "system", "content": f"[SYSTEM NOTIFICATION: {system_prompt_addition}]"})
+    
+    async with channel.typing():
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history[channel.id],
+                max_tokens=250,
+                temperature=0.9
+            )
+            ai_response = response.choices[0].message.content
+            
+            ai_response = re.sub(r'\[START_GAME:\s*(.+?)\]', '', ai_response, flags=re.IGNORECASE).strip()
+            ai_response = re.sub(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.+?))?\]', '', ai_response, flags=re.IGNORECASE).strip()
+            
+            conversation_history[channel.id].append({"role": "assistant", "content": ai_response})
+            if len(conversation_history[channel.id]) > MAX_HISTORY + 1:
+                conversation_history[channel.id].pop(1)
+            name = active_conversations.get(channel.id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
+            save_conversation(channel.id, name)
+            
+            await channel.send(ai_response)
+        except Exception as e:
+            print(f"Error forcing AI response: {e}")
+
 async def perform_coinflip(channel):
     outcome = random.choice(["Heads", "Tails"])
     await channel.send(f"I flipped a coin and it landed on {outcome}. Now stop making me do manual labor for you, idiot!")
@@ -486,7 +516,7 @@ async def on_message(message):
                             hp_count = int(parts[2]) if len(parts) > 2 else 3
                         except:
                             hp_count = 3
-                        view = CRCView(message.author, inject_game_memory, player_name=player_name, max_hp=hp_count)
+                        view = CRCView(message.author, inject_game_memory, player_name=player_name, max_hp=hp_count, trigger_ai_callback=force_ai_response)
                         img_bytes = generate_crc_board(view.player_hp, view.opp_hp, view.player_cards, view.opp_cards, opp_hidden=True, player_name=player_name)
                         file = discord.File(img_bytes, filename="board.png")
                         embed = discord.Embed(title="Crazy Revolver Cards", description=f"```yaml\n> {player_name.upper()} challenged Woolgirl!\n> Game starts with {hp_count} HP.\n```", color=0xD4AF37)

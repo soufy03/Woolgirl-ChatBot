@@ -22,7 +22,7 @@ def generate_card():
     return Card(value, symbol)
 
 def generate_crc_board(player_hp, opp_hp, player_cards, opp_cards, opp_hidden=False, player_name="YOU"):
-    bg_path = r"C:\Users\benze\Desktop\Dev\CRC\Game_Assets\retouched-image-18.png"
+    bg_path = "assets_exact/retouched-image-18.png"
     if os.path.exists(bg_path):
         base = Image.open(bg_path).convert("RGBA").resize((1280, 720))
         overlay = Image.new("RGBA", (1280, 720), (0, 0, 0, 160))
@@ -63,7 +63,7 @@ def generate_crc_board(player_hp, opp_hp, player_cards, opp_cards, opp_hidden=Fa
         for i in range(player_hp):
             base.paste(heart_icon, (30 + i*40, 660), heart_icon)
 
-    card_back_path = r"C:\Users\benze\Desktop\Dev\CRC\Game_Assets\retouched-image-19.png"
+    card_back_path = "assets_exact/retouched-image-19.png"
     card_back_img = None
     if os.path.exists(card_back_path):
         card_back_img = Image.open(card_back_path).convert("RGBA")
@@ -102,10 +102,11 @@ def generate_crc_board(player_hp, opp_hp, player_cards, opp_cards, opp_hidden=Fa
     return img_byte_arr
 
 class CRCView(discord.ui.View):
-    def __init__(self, player, inject_memory_callback, player_name="YOU", max_hp=3):
+    def __init__(self, player, inject_memory_callback, player_name="YOU", max_hp=3, trigger_ai_callback=None):
         super().__init__(timeout=300)
         self.player = player
         self.inject_memory_callback = inject_memory_callback
+        self.trigger_ai_callback = trigger_ai_callback
         self.player_name = str(player_name)
         self.max_hp = max_hp
         self.player_hp = max_hp
@@ -145,11 +146,12 @@ class CRCView(discord.ui.View):
         embed = discord.Embed(title="Crazy Revolver Cards", description=f"```yaml\n> {log_text}\n```", color=0xD4AF37)
         embed.set_image(url="attachment://board.png")
         
-        await interaction.response.edit_message(content="", embed=embed, attachments=[file], view=self)
+        await interaction.edit_original_response(content="", embed=embed, attachments=[file], view=self)
 
     async def redraw_callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         if not self.check_auth(interaction):
-            await interaction.response.send_message("Not your game!", ephemeral=True)
+            await interaction.followup.send("Not your game!", ephemeral=True)
             return
             
         self.player_cards = [generate_card() for _ in range(3)]
@@ -158,8 +160,9 @@ class CRCView(discord.ui.View):
         await self.send_embed(interaction, f"You used your Retry! Here is your new hand. Ready to battle?", opp_hidden=True)
 
     async def reveal_callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         if not self.check_auth(interaction):
-            await interaction.response.send_message("Not your game!", ephemeral=True)
+            await interaction.followup.send("Not your game!", ephemeral=True)
             return
 
         def eval_hand(cards):
@@ -202,28 +205,34 @@ class CRCView(discord.ui.View):
         if o_heal > 0: battle_log += f"❤️ She healed {o_heal} HP!\n"
             
         game_over = False
+        ai_msg = ""
         if self.player_hp <= 0 and self.opp_hp <= 0:
             battle_log += "\n💀 IT'S A DOUBLE KO DRAW!"
             game_over = True
+            ai_msg = f"The game of Crazy Revolver Cards against {self.player_name} ended in a DRAW! You both died! React to this tie!"
         elif self.player_hp <= 0:
             battle_log += "\n💀 YOU DIED! WOOLGIRL WINS!"
             game_over = True
-            self.inject_memory_callback(interaction.channel_id, f"You just beat {self.player_name} at a game of Crazy Revolver Cards! Gloat about how easily you crushed them!")
+            ai_msg = f"You just beat {self.player_name} at a game of Crazy Revolver Cards! Gloat about how easily you crushed them!"
         elif self.opp_hp <= 0:
             battle_log += "\n💀 WOOLGIRL DIES! YOU WIN!"
             game_over = True
-            self.inject_memory_callback(interaction.channel_id, f"The user {self.player_name} just beat you at Crazy Revolver Cards! Be very upset, make excuses, and accuse them of cheating!")
+            ai_msg = f"The user {self.player_name} just beat you at Crazy Revolver Cards! Be very upset, make excuses, and accuse them of cheating!"
 
         if game_over:
             self.clear_items()
+            if self.trigger_ai_callback:
+                import asyncio
+                asyncio.create_task(self.trigger_ai_callback(interaction.channel, ai_msg))
         else:
             self.setup_buttons(phase="next_round")
 
         await self.send_embed(interaction, battle_log.strip(), opp_hidden=False)
 
     async def next_round_callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         if not self.check_auth(interaction):
-            await interaction.response.send_message("Not your game!", ephemeral=True)
+            await interaction.followup.send("Not your game!", ephemeral=True)
             return
             
         self.start_round()
