@@ -208,6 +208,7 @@ Available commands:
 [COMMAND: load <name>] - Use this when the user asks to load a specific save file by name. (CRITICAL: Use the EXACT name the user gives you, including spaces! Do NOT replace spaces with underscores).
 [COMMAND: reset] - Use this when the user wants to completely erase your memory and start over without saving.
 [COMMAND: confirm_forget <number>] - If you decide to let the user delete a memory out of your own free will, or if you were bargaining and the user forcefully insists, you MUST surrender and output this command to comply. Act sad or annoyed about losing it if you wanted to keep it.
+[COMMAND: cancel_forget] - If you were bargaining to keep a memory, and you win the argument (the user gives up and agrees to let you keep it), you MUST output this command to end the argument and return to normal chat.
 
 Example:
 User: "Can we start a new save called beach episode?"
@@ -218,6 +219,7 @@ Woolgirl: "Ugh, fine! I'll wipe my memory and we can start your stupid beach epi
 conversation_history = {}
 active_conversations = {}
 global_diaries = {}
+bargaining_states = {}
 MAX_HISTORY = 20 
 
 def get_global_diary(channel_id):
@@ -420,16 +422,20 @@ def inject_game_memory(channel_id, result_text):
 
 async def force_ai_response(channel, system_prompt_addition):
     import re
-    if channel.id not in conversation_history:
-        conversation_history[channel.id] = []
+    is_bargaining = channel.id in bargaining_states
     
-    conversation_history[channel.id].append({"role": "system", "content": f"[SYSTEM NOTIFICATION: {system_prompt_addition}]"})
+    target_history = bargaining_states[channel.id] if is_bargaining else conversation_history.get(channel.id)
+    if target_history is None:
+        conversation_history[channel.id] = []
+        target_history = conversation_history[channel.id]
+    
+    target_history.append({"role": "system", "content": f"[SYSTEM NOTIFICATION: {system_prompt_addition}]"})
     
     async with channel.typing():
         try:
             client = get_active_client()
             
-            payload_history = list(conversation_history[channel.id])
+            payload_history = list(target_history)
             if len(payload_history) > 0 and payload_history[0].get("role") != "system":
                 payload_history.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
                 
@@ -449,15 +455,28 @@ async def force_ai_response(channel, system_prompt_addition):
             ai_response = response.choices[0].message.content
             
             ai_response = re.sub(r'\[START_GAME:\s*(.+?)\]', '', ai_response, flags=re.IGNORECASE).strip()
-            ai_response = re.sub(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.+?))?\]', '', ai_response, flags=re.IGNORECASE).strip()
             
-            conversation_history[channel.id].append({"role": "assistant", "content": ai_response})
-            if len(conversation_history[channel.id]) > MAX_HISTORY + 1:
-                bot.loop.create_task(compress_memory(channel.id))
-            name = active_conversations.get(channel.id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
-            save_conversation(channel.id, name)
+            cmd_match = re.search(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.+?))?\]', ai_response, re.IGNORECASE)
+            sys_command = None
+            sys_args = None
+            
+            if cmd_match:
+                sys_command = cmd_match.group(1).strip().lower()
+                sys_args = cmd_match.group(2).strip() if cmd_match.group(2) else None
+                ai_response = re.sub(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.+?))?\]', '', ai_response, flags=re.IGNORECASE).strip()
+            
+            target_history.append({"role": "assistant", "content": response.choices[0].message.content})
+            
+            if not is_bargaining:
+                if len(conversation_history[channel.id]) > MAX_HISTORY + 1:
+                    bot.loop.create_task(compress_memory(channel.id))
+                name = active_conversations.get(channel.id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
+                save_conversation(channel.id, name)
             
             await channel.send(ai_response)
+            
+            if sys_command:
+                await handle_system_command(sys_command, sys_args, channel, channel.id)
         except Exception as e:
             print(f"Error forcing AI response: {e}")
 
@@ -684,6 +703,11 @@ async def handle_system_command(command, args, channel, channel_id):
         if channel_id in active_conversations:
             del active_conversations[channel_id]
             
+    elif command == "cancel_forget":
+        if channel_id in bargaining_states:
+            del bargaining_states[channel_id]
+            await channel.send("*[SYSTEM: You yielded. The temporary bargaining state has ended, and she successfully kept her memory. You have returned to the normal active chat.]*")
+
     elif command == "confirm_forget":
         number = args
         diary_entries = get_global_diary(channel_id)
@@ -710,7 +734,10 @@ async def handle_system_command(command, args, channel, channel_id):
                         "content": f"[SYSTEM NOTIFICATION: Memory #{number} has been permanently erased from your Global Diary as requested. Act accordingly.]"
                     })
 
-        if isinstance(channel, discord.DMChannel):
+        if channel_id in bargaining_states:
+            del bargaining_states[channel_id]
+            await channel.send("*[SYSTEM: She yielded. The memory has been permanently erased, and the temporary bargaining state has ended. You have returned to the normal active chat.]*")
+        elif isinstance(channel, discord.DMChannel):
             await channel.send("I erased my internal memory! But since we are in a private DM, Discord physically won't let me delete your messages for you. You'll have to clear the screen yourself, idiot!")
         else:
             await channel.purge(limit=100)
@@ -744,8 +771,8 @@ async def on_message(message):
         is_dm = isinstance(message.channel, discord.DMChannel)
         has_active_save = channel_id in active_conversations and channel_id in conversation_history
         
-        if channel_id not in conversation_history:
-            conversation_history[channel_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        is_bargaining = channel_id in bargaining_states
+        target_history = bargaining_states[channel_id] if is_bargaining else conversation_history.setdefault(channel_id, [{"role": "system", "content": SYSTEM_PROMPT}])
 
         # Check for images
         if message.attachments:
@@ -755,20 +782,20 @@ async def on_message(message):
                     {"type": "text", "text": f"{message.author.display_name} (@{message.author.name}): {user_msg}"},
                     {"type": "image_url", "image_url": {"url": img_url}}
                 ]
-                conversation_history[channel_id].append({"role": "user", "content": content_payload})
+                target_history.append({"role": "user", "content": content_payload})
             else:
-                conversation_history[channel_id].append({"role": "user", "content": f"{message.author.display_name} (@{message.author.name}): {user_msg}\n\n[USER ATTACHED AN IMAGE. BUT YOU ARE RUNNING ON GROQ AND CANNOT SEE IT! Yell at the user for sending you a picture when you don't have your glasses on!]"})
+                target_history.append({"role": "user", "content": f"{message.author.display_name} (@{message.author.name}): {user_msg}\n\n[USER ATTACHED AN IMAGE. BUT YOU ARE RUNNING ON GROQ AND CANNOT SEE IT! Yell at the user for sending you a picture when you don't have your glasses on!]"})
         else:
-            conversation_history[channel_id].append({"role": "user", "content": f"{message.author.display_name} (@{message.author.name}): {user_msg}"})
+            target_history.append({"role": "user", "content": f"{message.author.display_name} (@{message.author.name}): {user_msg}"})
         
-        if len(conversation_history[channel_id]) > MAX_HISTORY + 1:
+        if not is_bargaining and len(conversation_history[channel_id]) > MAX_HISTORY + 1:
             bot.loop.create_task(compress_memory(channel_id))
 
         async with message.channel.typing():
             try:
                 client = get_active_client()
                 
-                payload_history = list(conversation_history[channel_id])
+                payload_history = list(target_history)
                 diary = get_global_diary(channel_id)
                 if diary:
                     payload_history[0] = {"role": "system", "content": f"{SYSTEM_PROMPT}\n\n[GLOBAL SUBCONSCIOUS DIARY]\n{diary}"}
@@ -800,12 +827,12 @@ async def on_message(message):
                             }
                         })
                     
-                    conversation_history[channel_id].append({"role": "assistant", "tool_calls": tool_call_dicts, "content": response_msg.content or ""})
+                    target_history.append({"role": "assistant", "tool_calls": tool_call_dicts, "content": response_msg.content or ""})
                     payload_history.append({"role": "assistant", "tool_calls": tool_call_dicts, "content": response_msg.content or ""})
                     
                     for tool_call in response_msg.tool_calls:
                         tool_result = await execute_tool_call(tool_call)
-                        conversation_history[channel_id].append({"role": "tool", "name": tool_call.function.name, "tool_call_id": tool_call.id, "content": tool_result})
+                        target_history.append({"role": "tool", "name": tool_call.function.name, "tool_call_id": tool_call.id, "content": tool_result})
                         payload_history.append({"role": "tool", "name": tool_call.function.name, "tool_call_id": tool_call.id, "content": tool_result})
                     
                     # Second LLM call with search results
@@ -866,13 +893,13 @@ async def on_message(message):
                 
                 print(f"PARSED CMD: {sys_command}, ARGS: {sys_args}")
 
-                if is_dm and not has_active_save and not sys_command:
+                if is_dm and not has_active_save and not sys_command and not is_bargaining:
                     await message.reply("Hmph! We don't have an active save file right now! You need to use `/new` to create a new conversation, or `/all_conversations` to load an old one before we can talk.")
-                    conversation_history[channel_id].pop()
+                    target_history.pop()
                     return
 
                 # Add AI's raw response to history (so it remembers its tags)
-                conversation_history[channel_id].append({"role": "assistant", "content": response.choices[0].message.content})
+                target_history.append({"role": "assistant", "content": response.choices[0].message.content})
                 
                 # Send the response back to Discord
                 if file_to_send:
@@ -918,8 +945,8 @@ async def on_message(message):
                 ]
                 await message.reply(f"{random.choice(excuses)}\n\n`[SYSTEM DEBUG ERROR: {e}]`")
                 
-        # Auto-save after responding
-        if is_dm:
+        # Auto-save after responding (only if not in a temporary state)
+        if is_dm and not is_bargaining:
             save_conversation(channel_id, active_conversations.get(channel_id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}"))
 
     await bot.process_commands(message)
@@ -982,7 +1009,9 @@ async def forget(interaction: discord.Interaction, number: int):
         
     prompt = f'The user just tried to delete entry #{number} from your Global Diary. The entry is: "{target_line}". You previously classified this memory as [{mem_class}]. Consider this class as a baseline, but remember you have complete free will. Just like a real human, your feelings can change based on recent events or how the user treats you. It is entirely up to you how you react—you can fiercely fight to keep it, reluctantly let it go, or agree to delete it immediately by outputting [COMMAND: confirm_forget {number}]. Do NOT output the command if you are bargaining to keep it.'
     
-    await interaction.response.send_message(f"*You attempted to delete memory #{number}. Let's see how she reacts...*")
+    await interaction.response.send_message(f"*You attempted to delete memory #{number}. You are now in a temporary bargaining state with her. Let's see how she reacts...*")
+    
+    bargaining_states[channel_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
     
     # Trigger AI response in the channel
     bot.loop.create_task(force_ai_response(interaction.channel, prompt))
