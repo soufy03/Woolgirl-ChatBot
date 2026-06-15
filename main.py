@@ -300,8 +300,8 @@ New Conversation:
 {json.dumps(messages_to_compress)}"""
 
     try:
-        response = await groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+        response = await openai_client.chat.completions.create(
+            model="google/gemini-1.5-flash",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4,
             max_tokens=150
@@ -809,6 +809,23 @@ async def new(interaction: discord.Interaction, name: str = None):
         await interaction.response.send_message(f"Fine, I wiped my memory. We are starting over in a new save called **'{name}'**. Don't be weird this time!")
     else:
         await interaction.response.send_message(f"Fine, I created a new save called **'{name}'** for us. Don't be weird!")
+
+@bot.tree.command(name="diary", description="Take a peek at Woolgirl's secret subconscious diary (long-term memory).")
+async def diary(interaction: discord.Interaction):
+    channel_id = interaction.channel_id
+    if channel_id not in conversation_history:
+        await interaction.response.send_message("I don't have any memories of you yet, baka! We haven't even talked!", ephemeral=True)
+        return
+        
+    system_content = conversation_history[channel_id][0].get('content', '')
+    if '[LONG TERM MEMORY]' in system_content:
+        parts = system_content.split('[LONG TERM MEMORY]')
+        diary_entries = parts[1].strip()
+        
+        embed = discord.Embed(title="📖 Woolgirl's Secret Diary", description=f"```yaml\n{diary_entries}\n```", color=0xFF69B4)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    else:
+        await interaction.response.send_message("My diary is empty right now! Stop snooping!!", ephemeral=True)
 
 @bot.tree.command(name="load", description="Loads a past conversation and prints the chat history.")
 @app_commands.describe(name="The exact name of the conversation you want to load")
