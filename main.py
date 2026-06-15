@@ -216,7 +216,38 @@ Woolgirl: "Ugh, fine! I'll wipe my memory and we can start your stupid beach epi
 # Simple in-memory conversation history
 conversation_history = {}
 active_conversations = {}
+global_diaries = {}
 MAX_HISTORY = 20 
+
+def get_global_diary(channel_id):
+    if channel_id in global_diaries:
+        return global_diaries[channel_id]
+        
+    if firebase_enabled:
+        ref = db.reference(f"global_memory/{channel_id}")
+        data = ref.get()
+        if data:
+            global_diaries[channel_id] = data
+            return data
+            
+    # Migration: check if old format is in current save
+    if channel_id in conversation_history and len(conversation_history[channel_id]) > 0:
+        sys_msg = conversation_history[channel_id][0].get('content', '')
+        if '[LONG TERM MEMORY]' in sys_msg:
+            parts = sys_msg.split('[LONG TERM MEMORY]')
+            old_diary = parts[1].strip()
+            # Strip it from the local save to finish migration
+            conversation_history[channel_id][0]['content'] = parts[0].strip()
+            save_global_diary(channel_id, old_diary)
+            return old_diary
+            
+    return ""
+
+def save_global_diary(channel_id, diary_text):
+    global_diaries[channel_id] = diary_text
+    if firebase_enabled:
+        ref = db.reference(f"global_memory/{channel_id}")
+        ref.set(diary_text)
 
 # Add these functions to manage saves
 os.makedirs("saves", exist_ok=True)
@@ -230,6 +261,15 @@ def load_conversation(channel_id, name):
         ref = db.reference(f"saves/{channel_id}/{safe_name}")
         data = ref.get()
         if data:
+            # Strip old embedded diary if present
+            if len(data) > 0 and data[0].get("role") == "system":
+                sys_content = data[0].get("content", "")
+                if "[LONG TERM MEMORY]" in sys_content:
+                    parts = sys_content.split("[LONG TERM MEMORY]")
+                    data[0]["content"] = parts[0].strip()
+                    old_diary = parts[1].strip()
+                    if old_diary and not get_global_diary(channel_id):
+                        save_global_diary(channel_id, old_diary)
             conversation_history[channel_id] = data
             return True
         return False
@@ -272,49 +312,55 @@ async def compress_memory(channel_id):
     if len(history) <= MAX_HISTORY:
         return
         
-    # The first message is always the SYSTEM_PROMPT.
-    # It might also contain the [LONG TERM MEMORY] appended to it.
-    system_msg = history[0]
     messages_to_compress = history[1:-5]
     recent_messages = history[-5:]
     
-    existing_summary = ""
-    system_content = system_msg.get('content', '')
-    
-    if '[LONG TERM MEMORY]' in system_content:
-        # Extract the existing summary block
-        parts = system_content.split('[LONG TERM MEMORY]')
-        existing_summary = parts[1].strip()
-        
     if not messages_to_compress:
         return
         
-    prompt = f"""You are Woolgirl's inner subconscious. Review this recent conversation and decide what you want to remember. 
-Write down up to 6 concise bullet points of the most important things you learned about this user, how you feel about them, or any important events. You have complete free will to use fewer bullet points depending purely on your own judgment of whether the recent events are actually important enough for you to remember.
-Write it from your own perspective (e.g., '- I learned that Sufyan is my creator...').
+    global_diary = get_global_diary(channel_id)
+    
+    highest_num = 0
+    if global_diary:
+        import re
+        numbers = re.findall(r'^(\d+)\.', global_diary, re.MULTILINE)
+        if numbers:
+            highest_num = max(int(n) for n in numbers)
+            
+    next_num = highest_num + 1
+        
+    prompt = f"""You are Woolgirl's inner subconscious. Review this recent conversation and append to your diary.
+Write up to 6 NEW numbered entries summarizing the most important facts you learned about this user, how you feel about them, or important events.
 
-Existing Memories:
-{existing_summary}
+CRITICAL RULES:
+1. Start your numbering at {next_num}. (e.g., {next_num}. I learned that... {next_num+1}. He also...)
+2. EACH numbered entry CAN be a maximum of 75 characters long. Be extremely concise. You can use less.
+3. Write it from your own perspective.
+4. Do NOT output anything else besides the numbered list. Do NOT rewrite the old entries. You have free will to write fewer than 6 entries if nothing important happened.
 
-New Conversation:
+Existing Global Memories:
+{global_diary if global_diary else "[Diary is currently empty]"}
+
+New Conversation to summarize:
 {json.dumps(messages_to_compress)}"""
 
     try:
-        response = await openai_client.chat.completions.create(
+        response = await openrouter_client.chat.completions.create(
             model="google/gemini-1.5-flash",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.4,
-            max_tokens=150
+            temperature=0.4
         )
-        new_summary = response.choices[0].message.content.strip()
+        new_entries = response.choices[0].message.content.strip()
         
-        # Combine original prompt with new memory
-        combined_system = f"{SYSTEM_PROMPT}\n\n[LONG TERM MEMORY]\n{new_summary}"
+        # Append new entries
+        updated_diary = f"{global_diary}\n{new_entries}".strip() if global_diary else new_entries
+        save_global_diary(channel_id, updated_diary)
         
-        conversation_history[channel_id] = [{"role": "system", "content": combined_system}] + recent_messages
+        # Truncate short-term history
+        conversation_history[channel_id] = [{"role": "system", "content": SYSTEM_PROMPT}] + recent_messages
         name = active_conversations.get(channel_id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
         save_conversation(channel_id, name)
-        print(f"Compressed memory for {channel_id}: {new_summary}")
+        print(f"Appended to global diary for {channel_id}: {new_entries}")
     except Exception as e:
         print(f"Failed to compress memory: {e}")
 
@@ -336,9 +382,21 @@ async def force_ai_response(channel, system_prompt_addition):
     async with channel.typing():
         try:
             client = get_active_client()
+            
+            payload_history = list(conversation_history[channel.id])
+            if len(payload_history) > 0 and payload_history[0].get("role") != "system":
+                payload_history.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
+                
+            diary = get_global_diary(channel.id)
+            if diary:
+                payload_history[0] = {"role": "system", "content": f"{SYSTEM_PROMPT}\n\n[GLOBAL SUBCONSCIOUS DIARY]\n{diary}"}
+                
+            if active_api_provider == "groq":
+                payload_history = sanitize_history_for_groq(payload_history)
+                
             response = await client.chat.completions.create(
                 model=active_model_name,
-                messages=sanitize_history_for_groq([{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history[channel.id]) if active_api_provider == "groq" else [{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history[channel.id],
+                messages=payload_history,
                 max_tokens=250,
                 temperature=0.9
             )
@@ -638,7 +696,11 @@ async def on_message(message):
             try:
                 client = get_active_client()
                 
-                payload_history = conversation_history[channel_id]
+                payload_history = list(conversation_history[channel_id])
+                diary = get_global_diary(channel_id)
+                if diary:
+                    payload_history[0] = {"role": "system", "content": f"{SYSTEM_PROMPT}\n\n[GLOBAL SUBCONSCIOUS DIARY]\n{diary}"}
+                    
                 if active_api_provider == "groq":
                     payload_history = sanitize_history_for_groq(payload_history)
 
@@ -782,7 +844,7 @@ async def on_message(message):
                     "I'm ignoring you for a minute because you're annoying!",
                     "Give me a minute, baka! It's not like I'm sitting around waiting for your messages!"
                 ]
-                await message.reply(random.choice(excuses))
+                await message.reply(f"{random.choice(excuses)}\n\n`[SYSTEM DEBUG ERROR: {e}]`")
                 
         # Auto-save after responding
         if is_dm:
@@ -810,22 +872,44 @@ async def new(interaction: discord.Interaction, name: str = None):
     else:
         await interaction.response.send_message(f"Fine, I created a new save called **'{name}'** for us. Don't be weird!")
 
-@bot.tree.command(name="diary", description="Take a peek at Woolgirl's secret subconscious diary (long-term memory).")
+@bot.tree.command(name="diary", description="Take a peek at Woolgirl's secret subconscious diary (global memory).")
 async def diary(interaction: discord.Interaction):
     channel_id = interaction.channel_id
-    if channel_id not in conversation_history:
-        await interaction.response.send_message("I don't have any memories of you yet, baka! We haven't even talked!", ephemeral=True)
-        return
-        
-    system_content = conversation_history[channel_id][0].get('content', '')
-    if '[LONG TERM MEMORY]' in system_content:
-        parts = system_content.split('[LONG TERM MEMORY]')
-        diary_entries = parts[1].strip()
-        
+    diary_entries = get_global_diary(channel_id)
+    if diary_entries:
         embed = discord.Embed(title="📖 Woolgirl's Secret Diary", description=f"```yaml\n{diary_entries}\n```", color=0xFF69B4)
         await interaction.response.send_message(embed=embed, ephemeral=True)
     else:
         await interaction.response.send_message("My diary is empty right now! Stop snooping!!", ephemeral=True)
+
+@bot.tree.command(name="forget", description="Force Woolgirl to forget a specific numbered diary entry.")
+@app_commands.describe(number="The exact number of the diary entry to delete")
+async def forget(interaction: discord.Interaction, number: int):
+    channel_id = interaction.channel_id
+    diary_entries = get_global_diary(channel_id)
+    if not diary_entries:
+        await interaction.response.send_message("I don't have any diary entries to forget!", ephemeral=True)
+        return
+        
+    lines = diary_entries.split('\n')
+    new_lines = []
+    deleted = False
+    
+    import re
+    target_pattern = re.compile(rf"^{number}\.")
+    
+    for line in lines:
+        if target_pattern.match(line.strip()):
+            deleted = True
+        else:
+            new_lines.append(line)
+            
+    if deleted:
+        updated_diary = '\n'.join(new_lines).strip()
+        save_global_diary(channel_id, updated_diary)
+        await interaction.response.send_message(f"Fine, I permanently erased entry #{number} from my brain. Happy?", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"Are you blind? There is no entry numbered {number} in my diary!", ephemeral=True)
 
 @bot.tree.command(name="load", description="Loads a past conversation and prints the chat history.")
 @app_commands.describe(name="The exact name of the conversation you want to load")
