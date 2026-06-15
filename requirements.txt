@@ -6,3 +6,4 @@ httpx==0.27.2
 Pillow
 pilmoji
 firebase-admin
+duckduckgo-search

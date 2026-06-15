@@ -13,6 +13,7 @@ from discord import app_commands
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from aiohttp import web
+from duckduckgo_search import AsyncDDGS
 
 # Load environment variables
 load_dotenv()
@@ -55,6 +56,65 @@ def get_active_client():
         return openrouter_client
     return groq_client
 
+BOT_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_web",
+            "description": "ONLY USE THIS IF the user explicitly asks you to look something up on the internet, OR if they mention a specific real-world topic/event you genuinely don't understand. DO NOT use this for general conversation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The specific search query to look up."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    }
+]
+
+async def execute_tool_call(tool_call):
+    if tool_call.function.name == "search_web":
+        try:
+            import json
+            args = json.loads(tool_call.function.arguments)
+            query = args.get("query")
+            print(f"Executing web search for: {query}")
+            results = await AsyncDDGS().text(query, max_results=3)
+            if not results:
+                return "No search results found."
+            formatted = "Search Results:\n"
+            for r in results:
+                formatted += f"- {r['title']}: {r['body']}\n"
+            return formatted
+        except Exception as e:
+            return f"Search failed: {e}"
+    return "Unknown tool"
+
+def sanitize_history_for_groq(history):
+    clean = []
+    for msg in history:
+        new_msg = {"role": msg["role"]}
+        
+        if isinstance(msg.get("content"), list):
+            text_parts = [item["text"] for item in msg["content"] if item["type"] == "text"]
+            new_msg["content"] = " ".join(text_parts) + "\n[User uploaded an image, but your Groq model cannot see it. Express annoyance.]"
+        else:
+            new_msg["content"] = msg.get("content", "")
+            
+        if "tool_calls" in msg:
+            new_msg["tool_calls"] = msg["tool_calls"]
+        if "tool_call_id" in msg:
+            new_msg["tool_call_id"] = msg["tool_call_id"]
+        if "name" in msg:
+            new_msg["name"] = msg["name"]
+            
+        clean.append(new_msg)
+    return clean
+
 # Initialize Discord Bot
 class TsundereBot(commands.Bot):
     def __init__(self):
@@ -84,13 +144,13 @@ async def switch_model(interaction: discord.Interaction, model: app_commands.Cho
     
     info = ""
     if model_name == "llama-3.1-8b-instant":
-        info = "🟢 **Cost:** 100% Free (Groq)\\n⏱️ **Speed:** Instantaneous\\n🚧 **Rate Limit:** 30 messages per minute (6,000 tokens/min)\\n🔄 **Refresh:** Rate limits reset every minute!"
+        info = "🟢 **Cost:** 100% Free (Groq)\\n⏱️ **Speed:** Instantaneous\\n👁️ **Vision:** No\\n🌐 **Web Browsing:** Yes\\n🚧 **Rate Limit:** 30 messages per minute\\n🔄 **Refresh:** Every minute"
     elif model_name == "llama3-70b-8192":
-        info = "🟢 **Cost:** 100% Free (Groq)\\n⏱️ **Speed:** Very Fast\\n🚧 **Rate Limit:** 30 messages per minute (6,000 tokens/min)\\n🔄 **Refresh:** Rate limits reset every minute!"
+        info = "🟢 **Cost:** 100% Free (Groq)\\n⏱️ **Speed:** Very Fast\\n👁️ **Vision:** No\\n🌐 **Web Browsing:** Yes\\n🚧 **Rate Limit:** 30 messages per minute\\n🔄 **Refresh:** Every minute"
     elif model_name == "openai/gpt-4o-mini":
-        info = "🟡 **Cost:** Paid via OpenRouter ($0.15 per 1 Million tokens)\\n⏱️ **Speed:** Fast\\n🚧 **Rate Limit:** None (As long as you have funds)\\n🔄 **Refresh:** N/A"
+        info = "🟡 **Cost:** Paid via OpenRouter ($0.15 per 1 Million tokens)\\n⏱️ **Speed:** Fast\\n👁️ **Vision:** Yes\\n🌐 **Web Browsing:** Yes\\n🚧 **Rate Limit:** None\\n🔄 **Refresh:** N/A"
     elif model_name == "google/gemini-1.5-flash":
-        info = "🟡 **Cost:** Paid via OpenRouter ($0.07 per 1 Million tokens)\\n⏱️ **Speed:** Instantaneous (Fastest paid model)\\n🚧 **Rate Limit:** None (As long as you have funds)\\n🔄 **Refresh:** N/A"
+        info = "🟡 **Cost:** Paid via OpenRouter ($0.07 per 1 Million tokens)\\n⏱️ **Speed:** Instantaneous (Fastest)\\n👁️ **Vision:** Yes\\n🌐 **Web Browsing:** Yes\\n🚧 **Rate Limit:** None\\n🔄 **Refresh:** N/A"
         
     await interaction.response.send_message(f"Switched model to **{model.name}**!\\n\\n{info}", ephemeral=False)
 
@@ -270,7 +330,7 @@ async def force_ai_response(channel, system_prompt_addition):
             client = get_active_client()
             response = await client.chat.completions.create(
                 model=active_model_name,
-                messages=[{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history[channel.id],
+                messages=sanitize_history_for_groq([{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history[channel.id]) if active_api_provider == "groq" else [{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history[channel.id],
                 max_tokens=250,
                 temperature=0.9
             )
@@ -549,7 +609,19 @@ async def on_message(message):
         if channel_id not in conversation_history:
             conversation_history[channel_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-        conversation_history[channel_id].append({"role": "user", "content": f"{message.author.display_name}: {user_msg}"})
+        # Check for images
+        if message.attachments:
+            img_url = message.attachments[0].url
+            if active_api_provider == "openrouter":
+                content_payload = [
+                    {"type": "text", "text": f"{message.author.display_name}: {user_msg}"},
+                    {"type": "image_url", "image_url": {"url": img_url}}
+                ]
+                conversation_history[channel_id].append({"role": "user", "content": content_payload})
+            else:
+                conversation_history[channel_id].append({"role": "user", "content": f"{message.author.display_name}: {user_msg}\n\n[USER ATTACHED AN IMAGE. BUT YOU ARE RUNNING ON GROQ AND CANNOT SEE IT! Yell at the user for sending you a picture when you don't have your glasses on!]"})
+        else:
+            conversation_history[channel_id].append({"role": "user", "content": f"{message.author.display_name}: {user_msg}"})
         
         if len(conversation_history[channel_id]) > MAX_HISTORY + 1:
             bot.loop.create_task(compress_memory(channel_id))
@@ -557,12 +629,51 @@ async def on_message(message):
         async with message.channel.typing():
             try:
                 client = get_active_client()
+                
+                payload_history = conversation_history[channel_id]
+                if active_api_provider == "groq":
+                    payload_history = sanitize_history_for_groq(payload_history)
+
+                # First LLM call
                 response = await client.chat.completions.create(
                     model=active_model_name, 
-                    messages=conversation_history[channel_id],
+                    messages=payload_history,
+                    tools=BOT_TOOLS,
+                    tool_choice="auto"
                 )
                 
-                ai_response = response.choices[0].message.content
+                response_msg = response.choices[0].message
+                
+                # Check for Tool Calls (Web Browsing)
+                if response_msg.tool_calls:
+                    print("Tool call detected!")
+                    tool_call_dicts = []
+                    for t in response_msg.tool_calls:
+                        tool_call_dicts.append({
+                            "id": t.id,
+                            "type": "function",
+                            "function": {
+                                "name": t.function.name,
+                                "arguments": t.function.arguments
+                            }
+                        })
+                    
+                    conversation_history[channel_id].append({"role": "assistant", "tool_calls": tool_call_dicts, "content": response_msg.content or ""})
+                    payload_history.append({"role": "assistant", "tool_calls": tool_call_dicts, "content": response_msg.content or ""})
+                    
+                    for tool_call in response_msg.tool_calls:
+                        tool_result = await execute_tool_call(tool_call)
+                        conversation_history[channel_id].append({"role": "tool", "name": tool_call.function.name, "tool_call_id": tool_call.id, "content": tool_result})
+                        payload_history.append({"role": "tool", "name": tool_call.function.name, "tool_call_id": tool_call.id, "content": tool_result})
+                    
+                    # Second LLM call with search results
+                    response = await client.chat.completions.create(
+                        model=active_model_name,
+                        messages=payload_history
+                    )
+                    response_msg = response.choices[0].message
+                
+                ai_response = response_msg.content
                 print(f"AI RAW RESPONSE: {ai_response}")
                 
                 # Parse for the GIF search tag
