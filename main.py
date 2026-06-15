@@ -62,7 +62,10 @@ GAME INSTRUCTION: You can play minigames with the user! Available games: Tic-Tac
 If the user mentions playing a game, list these options and ask what they want to play.
 CRITICAL RULE: DO NOT output a [START_GAME] tag when just listing the games! ONLY output the tag AFTER the user has explicitly told you which game they want to play. 
 When it is time to start, format it EXACTLY like this at the very end of your message: 
-[START_GAME: tictactoe], [START_GAME: rps], [START_GAME: coinflip], or [START_GAME: crc]
+[START_GAME: tictactoe], [START_GAME: rps], or [START_GAME: coinflip].
+For CRC ONLY, you have the power to choose the player's nickname and the starting HP! Format it like this:
+[START_GAME: crc | PlayerNickname | HP_Amount]
+(e.g. [START_GAME: crc | Dummy | 3]). Choose a nickname you feel fits the user right now, and choose an HP between 3 and 10 based on what they asked.
 
 IMPORTANT: When you use the [START_GAME] tag, DO NOT simulate, narrate, or play the game in your text response! The system will automatically spawn a visual game UI for the user. Just say something tsundere about preparing the game, output the tag, and stop.
 
@@ -439,7 +442,7 @@ async def on_message(message):
                 game_to_start = None
                 
                 if game_match:
-                    game_to_start = game_match.group(1).strip().lower()
+                    game_to_start = game_match.group(1).strip()
                     ai_response = re.sub(r'\[START_GAME:\s*(.+?)\]', '', ai_response, flags=re.IGNORECASE).strip()
 
                 cmd_match = re.search(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.+?))?\]', ai_response, re.IGNORECASE)
@@ -475,12 +478,20 @@ async def on_message(message):
                         await message.channel.send("Rock, Paper, Scissors! Make your choice, slowpoke!", view=RPSView(message.author))
                     elif "coinflip" in game_to_start:
                         await perform_coinflip(message.channel)
-                    elif "crc" in game_to_start:
+                    elif "crc" in game_to_start.lower():
                         from crc_game import CRCView, generate_crc_board
-                        view = CRCView(message.author, inject_game_memory)
-                        img_bytes = generate_crc_board(view.player_hp, view.opp_hp, view.player_cards, view.opp_cards, opp_hidden=True)
+                        parts = [p.strip() for p in game_to_start.split('|')]
+                        player_name = parts[1] if len(parts) > 1 else message.author.display_name
+                        try:
+                            hp_count = int(parts[2]) if len(parts) > 2 else 3
+                        except:
+                            hp_count = 3
+                        view = CRCView(message.author, inject_game_memory, player_name=player_name, max_hp=hp_count)
+                        img_bytes = generate_crc_board(view.player_hp, view.opp_hp, view.player_cards, view.opp_cards, opp_hidden=True, player_name=player_name)
                         file = discord.File(img_bytes, filename="board.png")
-                        await message.channel.send("Oh? You think you can beat me at Crazy Revolver Cards? Deal your cards, baka!", file=file, view=view)
+                        embed = discord.Embed(title="Crazy Revolver Cards", description=f"```yaml\n> {player_name.upper()} challenged Woolgirl!\n> Game starts with {hp_count} HP.\n```", color=0xD4AF37)
+                        embed.set_image(url="attachment://board.png")
+                        await message.channel.send("Oh? You think you can beat me at Crazy Revolver Cards? Deal your cards, baka!", embed=embed, file=file, view=view)
                         
                 # Trigger system commands AFTER sending the AI's dialogue
                 if sys_command:
