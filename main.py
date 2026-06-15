@@ -216,7 +216,7 @@ Woolgirl: "Ugh, fine! I'll wipe my memory and we can start your stupid beach epi
 # Simple in-memory conversation history
 conversation_history = {}
 active_conversations = {}
-MAX_HISTORY = 10 
+MAX_HISTORY = 20 
 
 # Add these functions to manage saves
 os.makedirs("saves", exist_ok=True)
@@ -289,16 +289,11 @@ async def compress_memory(channel_id):
     if not messages_to_compress:
         return
         
-    prompt = f"""You are an efficient memory compressor. Summarize the conversation.
-Merge new info into the existing summary.
-Output ONLY in this EXACT format, absolutely no other text:
-+: [Things user likes]
--: [Things user hates]
-i: [User info/facts/game outcomes]
+    prompt = f"""You are Woolgirl's inner subconscious. Review this recent conversation and decide what you want to remember. 
+Write down up to 6 concise bullet points of the most important things you learned about this user, how you feel about them, or any important events. You have complete free will to use fewer bullet points depending purely on your own judgment of whether the recent events are actually important enough for you to remember.
+Write it from your own perspective (e.g., '- I learned that Sufyan is my creator...').
 
-Keep under 35 tokens. Very concise!
-
-Existing Summary:
+Existing Memories:
 {existing_summary}
 
 New Conversation:
@@ -308,8 +303,8 @@ New Conversation:
         response = await groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=60
+            temperature=0.4,
+            max_tokens=150
         )
         new_summary = response.choices[0].message.content.strip()
         
