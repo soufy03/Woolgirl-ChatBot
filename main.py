@@ -622,14 +622,14 @@ async def on_message(message):
             img_url = message.attachments[0].url
             if active_api_provider == "openrouter":
                 content_payload = [
-                    {"type": "text", "text": f"{message.author.display_name}: {user_msg}"},
+                    {"type": "text", "text": f"{message.author.display_name} (@{message.author.name}): {user_msg}"},
                     {"type": "image_url", "image_url": {"url": img_url}}
                 ]
                 conversation_history[channel_id].append({"role": "user", "content": content_payload})
             else:
-                conversation_history[channel_id].append({"role": "user", "content": f"{message.author.display_name}: {user_msg}\n\n[USER ATTACHED AN IMAGE. BUT YOU ARE RUNNING ON GROQ AND CANNOT SEE IT! Yell at the user for sending you a picture when you don't have your glasses on!]"})
+                conversation_history[channel_id].append({"role": "user", "content": f"{message.author.display_name} (@{message.author.name}): {user_msg}\n\n[USER ATTACHED AN IMAGE. BUT YOU ARE RUNNING ON GROQ AND CANNOT SEE IT! Yell at the user for sending you a picture when you don't have your glasses on!]"})
         else:
-            conversation_history[channel_id].append({"role": "user", "content": f"{message.author.display_name}: {user_msg}"})
+            conversation_history[channel_id].append({"role": "user", "content": f"{message.author.display_name} (@{message.author.name}): {user_msg}"})
         
         if len(conversation_history[channel_id]) > MAX_HISTORY + 1:
             bot.loop.create_task(compress_memory(channel_id))
