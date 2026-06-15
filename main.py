@@ -13,7 +13,8 @@ from discord import app_commands
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from aiohttp import web
-from duckduckgo_search import AsyncDDGS
+from duckduckgo_search import DDGS
+import asyncio
 
 # Load environment variables
 load_dotenv()
@@ -83,7 +84,9 @@ async def execute_tool_call(tool_call):
             args = json.loads(tool_call.function.arguments)
             query = args.get("query")
             print(f"Executing web search for: {query}")
-            results = await AsyncDDGS().text(query, max_results=3)
+            def run_search():
+                return DDGS().text(query, max_results=3)
+            results = await asyncio.to_thread(run_search)
             if not results:
                 return "No search results found."
             formatted = "Search Results:\n"
