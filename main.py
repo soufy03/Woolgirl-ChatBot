@@ -269,7 +269,7 @@ def get_saved_conversations(channel_id):
 
 async def compress_memory(channel_id):
     history = conversation_history.get(channel_id, [])
-    if len(history) <= 10:
+    if len(history) <= MAX_HISTORY:
         return
         
     # The first message is always the SYSTEM_PROMPT.
