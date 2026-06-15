@@ -6,6 +6,8 @@ import datetime
 import discord
 import aiohttp
 import io
+import firebase_admin
+from firebase_admin import credentials, db
 from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
@@ -16,6 +18,20 @@ from aiohttp import web
 load_dotenv()
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
+FIREBASE_CRED_JSON = os.getenv('FIREBASE_CREDENTIALS')
+
+firebase_enabled = False
+if FIREBASE_CRED_JSON:
+    try:
+        cred_dict = json.loads(FIREBASE_CRED_JSON)
+        cred = credentials.Certificate(cred_dict)
+        firebase_admin.initialize_app(cred, {
+            'databaseURL': 'https://woolgirl-chatbot-memory-default-rtdb.firebaseio.com/'
+        })
+        firebase_enabled = True
+        print("Firebase initialized successfully!")
+    except Exception as e:
+        print(f"Failed to initialize Firebase: {e}")
 
 # Initialize Groq client
 ai_client = AsyncOpenAI(
@@ -54,6 +70,9 @@ CRITICAL RULE: DO NOT use stage directions or action prefixes at the start of yo
 Do NOT act like a helpful AI assistant. You are a sassy, fluffy AI roommate living on a PC. Stay in character 100% of the time.
 CRITICAL RULE: While you are a tsundere, do NOT stubbornly deny the user's requests just to stay in character. You can complain and act annoyed about it, but if the user persists, you MUST actually listen to them and do what they ask.
 CRITICAL RULE: Your character background (your height, being a woolgirl, living on a hard drive, SBZ Production) is a STRICT SECRET. Do NOT mention any of these details unless the user explicitly asks you a direct question about them. Focus on the current conversation topic instead of talking about yourself!
+
+[MEMORY KEY]
++ means user likes, - means user hates, i means user info.
 
 OPTIONAL INSTRUCTION: If you are feeling a strong emotion and want to send a GIF, you MAY end your message with a GIF search tag on a new line. Do NOT use this on every message, only when it adds impact.
 Format it EXACTLY like this: [GIF: your search query]
@@ -103,35 +122,100 @@ def get_safe_filename(name):
 
 def load_conversation(channel_id, name):
     safe_name = get_safe_filename(name)
-    filepath = f"saves/{channel_id}_{safe_name}.json"
-    if os.path.exists(filepath):
-        with open(filepath, 'r') as f:
-            conversation_history[channel_id] = json.load(f)
-        return True
-    return False
+    if firebase_enabled:
+        ref = db.reference(f"saves/{channel_id}/{safe_name}")
+        data = ref.get()
+        if data:
+            conversation_history[channel_id] = data
+            return True
+        return False
+    else:
+        filepath = f"saves/{channel_id}_{safe_name}.json"
+        if os.path.exists(filepath):
+            with open(filepath, 'r') as f:
+                conversation_history[channel_id] = json.load(f)
+            return True
+        return False
 
 def save_conversation(channel_id, name):
     safe_name = get_safe_filename(name)
-    filepath = f"saves/{channel_id}_{safe_name}.json"
-    with open(filepath, 'w') as f:
-        json.dump(conversation_history.get(channel_id, []), f)
+    data = conversation_history.get(channel_id, [])
+    if firebase_enabled:
+        ref = db.reference(f"saves/{channel_id}/{safe_name}")
+        ref.set(data)
+    else:
+        filepath = f"saves/{channel_id}_{safe_name}.json"
+        with open(filepath, 'w') as f:
+            json.dump(data, f)
 
 def get_saved_conversations(channel_id):
-    prefix = f"{channel_id}_"
-    saves = []
-    for file in os.listdir("saves"):
-        if file.startswith(prefix) and file.endswith(".json"):
-            saves.append(file[len(prefix):-5])
-    return saves
+    if firebase_enabled:
+        ref = db.reference(f"saves/{channel_id}")
+        data = ref.get()
+        if data:
+            return list(data.keys())
+        return []
+    else:
+        prefix = f"{channel_id}_"
+        saves = []
+        for file in os.listdir("saves"):
+            if file.startswith(prefix) and file.endswith(".json"):
+                saves.append(file[len(prefix):-5])
+        return saves
+
+async def compress_memory(channel_id):
+    history = conversation_history.get(channel_id, [])
+    if len(history) <= 10:
+        return
+        
+    messages_to_compress = history[:-5]
+    recent_messages = history[-5:]
+    
+    existing_summary = ""
+    if messages_to_compress and messages_to_compress[0].get('role') == 'system' and '[LONG TERM MEMORY]' in messages_to_compress[0].get('content', ''):
+        existing_summary = messages_to_compress[0]['content']
+        messages_to_compress = messages_to_compress[1:]
+        
+    if not messages_to_compress:
+        return
+        
+    prompt = f"""You are an efficient memory compressor. Summarize the conversation.
+Merge new info into the existing summary.
+Output ONLY in this EXACT format, absolutely no other text:
++: [Things user likes]
+-: [Things user hates]
+i: [User info/facts/game outcomes]
+
+Keep under 35 tokens. Very concise!
+
+Existing Summary:
+{existing_summary}
+
+New Conversation:
+{json.dumps(messages_to_compress)}"""
+
+    try:
+        response = await ai_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=60
+        )
+        new_summary = response.choices[0].message.content.strip()
+        conversation_history[channel_id] = [{"role": "system", "content": f"[LONG TERM MEMORY]\n{new_summary}"}] + recent_messages
+        name = active_conversations.get(channel_id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
+        save_conversation(channel_id, name)
+        print(f"Compressed memory for {channel_id}: {new_summary}")
+    except Exception as e:
+        print(f"Failed to compress memory: {e}")
 
 def inject_game_memory(channel_id, result_text):
     if channel_id in conversation_history:
         notification = f"[SYSTEM NOTIFICATION: {result_text}]"
         conversation_history[channel_id].append({"role": "system", "content": notification})
-        if len(conversation_history[channel_id]) > MAX_HISTORY + 1:
-            conversation_history[channel_id].pop(1)
         name = active_conversations.get(channel_id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
         save_conversation(channel_id, name)
+        bot.loop.create_task(compress_memory(channel_id))
 
 async def force_ai_response(channel, system_prompt_addition):
     import re
@@ -155,7 +239,7 @@ async def force_ai_response(channel, system_prompt_addition):
             
             conversation_history[channel.id].append({"role": "assistant", "content": ai_response})
             if len(conversation_history[channel.id]) > MAX_HISTORY + 1:
-                conversation_history[channel.id].pop(1)
+                bot.loop.create_task(compress_memory(channel.id))
             name = active_conversations.get(channel.id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
             save_conversation(channel.id, name)
             
@@ -426,7 +510,7 @@ async def on_message(message):
         conversation_history[channel_id].append({"role": "user", "content": f"{message.author.display_name}: {user_msg}"})
         
         if len(conversation_history[channel_id]) > MAX_HISTORY + 1:
-            conversation_history[channel_id].pop(1)
+            bot.loop.create_task(compress_memory(channel_id))
 
         async with message.channel.typing():
             try:
