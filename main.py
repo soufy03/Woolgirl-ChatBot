@@ -207,6 +207,7 @@ Available commands:
 [COMMAND: new <name>] - Use this when the user asks to start a new chat, wipe your memory, or create a new save. If they don't provide a name, just use [COMMAND: new].
 [COMMAND: load <name>] - Use this when the user asks to load a specific save file by name. (CRITICAL: Use the EXACT name the user gives you, including spaces! Do NOT replace spaces with underscores).
 [COMMAND: reset] - Use this when the user wants to completely erase your memory and start over without saving.
+[COMMAND: confirm_forget <number>] - If you were bargaining to keep a memory in your Global Diary, and the user forcefully insists on deleting it, or if you decide the memory is [Useless] and agree to delete it, you MUST surrender and output this command to comply. Act sad about losing it if you wanted to keep it.
 
 Example:
 User: "Can we start a new save called beach episode?"
@@ -333,10 +334,11 @@ async def compress_memory(channel_id):
 Write up to 6 NEW numbered entries summarizing the most important facts you learned about this user, how you feel about them, or important events.
 
 CRITICAL RULES:
-1. Start your numbering at {next_num}. (e.g., {next_num}. I learned that... {next_num+1}. He also...)
-2. EACH numbered entry CAN be a maximum of 75 characters long. Be extremely concise. You can use less.
-3. Write it from your own perspective.
-4. Do NOT output anything else besides the numbered list. Do NOT rewrite the old entries. You have free will to write fewer than 6 entries if nothing important happened.
+1. Start your numbering at {next_num}. (e.g., {next_num}. [Class] I learned that...)
+2. EVERY entry MUST begin with a classification tag: [Useless], [Normal], or [Core Memory].
+3. EACH numbered entry CAN be a maximum of 75 characters long. Be extremely concise. You can use less.
+4. Write it from your own perspective.
+5. Do NOT output anything else besides the numbered list. Do NOT rewrite the old entries. You have free will to write fewer than 6 entries if nothing important happened.
 
 Existing Global Memories:
 {global_diary if global_diary else "[Diary is currently empty]"}
@@ -361,8 +363,47 @@ New Conversation to summarize:
         name = active_conversations.get(channel_id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
         save_conversation(channel_id, name)
         print(f"Appended to global diary for {channel_id}: {new_entries}")
+        
+        if firebase_enabled:
+            cycle_ref = db.reference(f"global_memory_cycles/{channel_id}")
+            cycles = cycle_ref.get() or 0
+            cycles += 1
+            cycle_ref.set(cycles)
+            if cycles % 5 == 0:
+                bot.loop.create_task(reevaluate_memory(channel_id))
     except Exception as e:
         print(f"Failed to compress memory: {e}")
+
+async def reevaluate_memory(channel_id):
+    global_diary = get_global_diary(channel_id)
+    if not global_diary:
+        return
+        
+    prompt = f"""You are Woolgirl. It is time to autonomously audit your entire Global Diary.
+Based on your personality and what you've learned, evaluate all your memories below.
+1. Re-classify any memories if your feelings have changed (e.g. from [Normal] to [Core Memory]).
+2. If there are any [Useless] memories you no longer want to carry around, permanently delete them by simply omitting them from your output.
+3. Keep the exact same numbering for the entries you keep. Do NOT renumber them!
+
+CRITICAL RULES:
+- Output NOTHING except the revised numbered list.
+- Keep the `[Class]` tags strictly formatted as `[Useless]`, `[Normal]`, or `[Core Memory]`.
+- Be ruthless. If something is [Useless], drop it.
+
+Your Current Global Diary:
+{global_diary}"""
+
+    try:
+        response = await openrouter_client.chat.completions.create(
+            model="google/gemini-1.5-flash",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.4
+        )
+        audited_diary = response.choices[0].message.content.strip()
+        save_global_diary(channel_id, audited_diary)
+        print(f"Autonomously audited global diary for {channel_id}.")
+    except Exception as e:
+        print(f"Failed to audit memory: {e}")
 
 def inject_game_memory(channel_id, result_text):
     if channel_id in conversation_history:
@@ -638,6 +679,32 @@ async def handle_system_command(command, args, channel, channel_id):
         if channel_id in active_conversations:
             del active_conversations[channel_id]
             
+    elif command == "confirm_forget":
+        number = args
+        diary_entries = get_global_diary(channel_id)
+        if diary_entries and number:
+            lines = diary_entries.split('\n')
+            new_lines = []
+            deleted = False
+            
+            import re
+            target_pattern = re.compile(rf"^{number}\.")
+            for line in lines:
+                if target_pattern.match(line.strip()):
+                    deleted = True
+                else:
+                    new_lines.append(line)
+                    
+            if deleted:
+                updated_diary = '\n'.join(new_lines).strip()
+                save_global_diary(channel_id, updated_diary)
+                
+                if channel_id in conversation_history:
+                    conversation_history[channel_id].append({
+                        "role": "system", 
+                        "content": f"[SYSTEM NOTIFICATION: Memory #{number} has been permanently erased from your Global Diary as requested. Act accordingly.]"
+                    })
+
         if isinstance(channel, discord.DMChannel):
             await channel.send("I erased my internal memory! But since we are in a private DM, Discord physically won't let me delete your messages for you. You'll have to clear the screen yourself, idiot!")
         else:
@@ -892,24 +959,28 @@ async def forget(interaction: discord.Interaction, number: int):
         return
         
     lines = diary_entries.split('\n')
-    new_lines = []
-    deleted = False
+    target_line = None
     
     import re
     target_pattern = re.compile(rf"^{number}\.")
-    
     for line in lines:
         if target_pattern.match(line.strip()):
-            deleted = True
-        else:
-            new_lines.append(line)
+            target_line = line.strip()
+            break
             
-    if deleted:
-        updated_diary = '\n'.join(new_lines).strip()
-        save_global_diary(channel_id, updated_diary)
-        await interaction.response.send_message(f"Fine, I permanently erased entry #{number} from my brain. Happy?", ephemeral=True)
-    else:
+    if not target_line:
         await interaction.response.send_message(f"Are you blind? There is no entry numbered {number} in my diary!", ephemeral=True)
+        return
+        
+    class_match = re.search(r'\[(.*?)\]', target_line)
+    mem_class = class_match.group(1) if class_match else "Normal"
+        
+    prompt = f'The user just tried to delete entry #{number} from your Global Diary. The entry is: "{target_line}". Since you previously classified this as a [{mem_class}] memory, you must evaluate if you are willing to part with it. If it is [Useless] or you no longer care about it, you can accept the deletion immediately by outputting [COMMAND: confirm_forget {number}]. If it is [Normal] or [Core Memory], you CAN bargain with the user to keep it. Do NOT output the command if you are bargaining.'
+    
+    await interaction.response.send_message(f"*You attempted to delete memory #{number}. Let's see how she reacts...*")
+    
+    # Trigger AI response in the channel
+    bot.loop.create_task(force_ai_response(interaction.channel, prompt))
 
 @bot.tree.command(name="load", description="Loads a past conversation and prints the chat history.")
 @app_commands.describe(name="The exact name of the conversation you want to load")
