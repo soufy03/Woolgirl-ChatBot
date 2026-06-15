@@ -136,8 +136,8 @@ bot.remove_command('help')
 @app_commands.choices(model=[
     app_commands.Choice(name="Groq (Free) - Llama 3.1 8B", value="groq:llama-3.1-8b-instant"),
     app_commands.Choice(name="Groq (Free) - Llama 3 70B", value="groq:llama3-70b-8192"),
-    app_commands.Choice(name="OpenRouter (Paid) - GPT 4o-mini", value="openrouter:openai/gpt-4o-mini"),
-    app_commands.Choice(name="OpenRouter (Paid) - Gemini 1.5 Flash", value="openrouter:google/gemini-1.5-flash")
+    app_commands.Choice(name="OpenRouter (Free) - Gemma 4 31B", value="openrouter:google/gemma-4-31b-it:free"),
+    app_commands.Choice(name="OpenRouter (Paid) - GPT 4o-mini", value="openrouter:openai/gpt-4o-mini")
 ])
 async def switch_model(interaction: discord.Interaction, model: app_commands.Choice[str]):
     global active_api_provider, active_model_name
@@ -152,8 +152,8 @@ async def switch_model(interaction: discord.Interaction, model: app_commands.Cho
         info = "🟢 **Cost:** 100% Free (Groq)\\n⏱️ **Speed:** Very Fast\\n👁️ **Vision:** No\\n🌐 **Web Browsing:** Yes\\n🚧 **Rate Limit:** 30 messages per minute\\n🔄 **Refresh:** Every minute"
     elif model_name == "openai/gpt-4o-mini":
         info = "🟡 **Cost:** Paid via OpenRouter ($0.15 per 1 Million tokens)\\n⏱️ **Speed:** Fast\\n👁️ **Vision:** Yes\\n🌐 **Web Browsing:** Yes\\n🚧 **Rate Limit:** None\\n🔄 **Refresh:** N/A"
-    elif model_name == "google/gemini-1.5-flash":
-        info = "🟡 **Cost:** Paid via OpenRouter ($0.07 per 1 Million tokens)\\n⏱️ **Speed:** Instantaneous (Fastest)\\n👁️ **Vision:** Yes\\n🌐 **Web Browsing:** Yes\\n🚧 **Rate Limit:** None\\n🔄 **Refresh:** N/A"
+    elif model_name == "google/gemma-4-31b-it:free":
+        info = "🟢 **Cost:** 100% Free via OpenRouter\\n⏱️ **Speed:** Very Slow (Deprioritized queue)\\n👁️ **Vision:** No\\n🌐 **Web Browsing:** No\\n🚧 **Rate Limit:** Heavy Rate Limits\\n🔄 **Refresh:** N/A"
         
     await interaction.response.send_message(f"Switched model to **{model.name}**!\\n\\n{info}", ephemeral=False)
 
@@ -207,7 +207,7 @@ Available commands:
 [COMMAND: new <name>] - Use this when the user asks to start a new chat, wipe your memory, or create a new save. If they don't provide a name, just use [COMMAND: new].
 [COMMAND: load <name>] - Use this when the user asks to load a specific save file by name. (CRITICAL: Use the EXACT name the user gives you, including spaces! Do NOT replace spaces with underscores).
 [COMMAND: reset] - Use this when the user wants to completely erase your memory and start over without saving.
-[COMMAND: confirm_forget <number>] - If you were bargaining to keep a memory in your Global Diary, and the user forcefully insists on deleting it, or if you decide the memory is [Useless] and agree to delete it, you MUST surrender and output this command to comply. Act sad about losing it if you wanted to keep it.
+[COMMAND: confirm_forget <number>] - If you decide to let the user delete a memory out of your own free will, or if you were bargaining and the user forcefully insists, you MUST surrender and output this command to comply. Act sad or annoyed about losing it if you wanted to keep it.
 
 Example:
 User: "Can we start a new save called beach episode?"
@@ -348,7 +348,7 @@ New Conversation to summarize:
 
     try:
         response = await openrouter_client.chat.completions.create(
-            model="google/gemini-1.5-flash",
+            model="openai/gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4
         )
@@ -380,22 +380,27 @@ async def reevaluate_memory(channel_id):
         return
         
     prompt = f"""You are Woolgirl. It is time to autonomously audit your entire Global Diary.
-Based on your personality and what you've learned, evaluate all your memories below.
-1. Re-classify any memories if your feelings have changed (e.g. from [Normal] to [Core Memory]).
-2. If there are any [Useless] memories you no longer want to carry around, permanently delete them by simply omitting them from your output.
-3. Keep the exact same numbering for the entries you keep. Do NOT renumber them!
+Here is how your memory classification works:
+- [Useless] = Low importance (-1)
+- [Normal] = Standard importance (0)
+- [Core Memory] = High importance (+1)
+
+Based entirely on your own free will, personality, and current feelings:
+1. Use the current memory class as a baseline, but do not let it restrict you. If the user recently said or did something related to a specific memory, you have the free will to upgrade or downgrade its class.
+2. If your opinion on a memory has changed based on recent events, you have the free will to OVERWRITE and rewrite the text of that specific memory to reflect your new stance. (e.g., if you previously liked their anime taste but they just said something stupid about it, you can rewrite the memory to reflect your new annoyance). The change must be reasonable and related to what actually happened.
+3. You can choose to permanently delete any memory by simply omitting it from your output.
+4. Keep the exact same numbering for the entries you keep. Do NOT renumber them!
 
 CRITICAL RULES:
 - Output NOTHING except the revised numbered list.
 - Keep the `[Class]` tags strictly formatted as `[Useless]`, `[Normal]`, or `[Core Memory]`.
-- Be ruthless. If something is [Useless], drop it.
 
 Your Current Global Diary:
 {global_diary}"""
 
     try:
         response = await openrouter_client.chat.completions.create(
-            model="google/gemini-1.5-flash",
+            model="openai/gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4
         )
@@ -975,7 +980,7 @@ async def forget(interaction: discord.Interaction, number: int):
     class_match = re.search(r'\[(.*?)\]', target_line)
     mem_class = class_match.group(1) if class_match else "Normal"
         
-    prompt = f'The user just tried to delete entry #{number} from your Global Diary. The entry is: "{target_line}". Since you previously classified this as a [{mem_class}] memory, you must evaluate if you are willing to part with it. If it is [Useless] or you no longer care about it, you can accept the deletion immediately by outputting [COMMAND: confirm_forget {number}]. If it is [Normal] or [Core Memory], you CAN bargain with the user to keep it. Do NOT output the command if you are bargaining.'
+    prompt = f'The user just tried to delete entry #{number} from your Global Diary. The entry is: "{target_line}". You previously classified this memory as [{mem_class}]. Consider this class as a baseline, but remember you have complete free will. Just like a real human, your feelings can change based on recent events or how the user treats you. It is entirely up to you how you react—you can fiercely fight to keep it, reluctantly let it go, or agree to delete it immediately by outputting [COMMAND: confirm_forget {number}]. Do NOT output the command if you are bargaining to keep it.'
     
     await interaction.response.send_message(f"*You attempted to delete memory #{number}. Let's see how she reacts...*")
     
