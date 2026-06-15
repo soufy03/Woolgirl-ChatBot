@@ -18,6 +18,7 @@ from aiohttp import web
 load_dotenv()
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
+OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
 FIREBASE_CRED_JSON = os.getenv('FIREBASE_CREDENTIALS')
 
 firebase_enabled = False
@@ -34,10 +35,25 @@ if FIREBASE_CRED_JSON:
         print(f"Failed to initialize Firebase: {e}")
 
 # Initialize Groq client
-ai_client = AsyncOpenAI(
+groq_client = AsyncOpenAI(
     base_url="https://api.groq.com/openai/v1",
     api_key=GROQ_API_KEY,
 )
+
+# Initialize OpenRouter client
+openrouter_client = AsyncOpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=OPENROUTER_API_KEY,
+)
+
+# Global Model State
+active_api_provider = "groq"
+active_model_name = "llama-3.1-8b-instant"
+
+def get_active_client():
+    if active_api_provider == "openrouter":
+        return openrouter_client
+    return groq_client
 
 # Initialize Discord Bot
 class TsundereBot(commands.Bot):
@@ -52,6 +68,31 @@ class TsundereBot(commands.Bot):
 
 bot = TsundereBot()
 bot.remove_command('help')
+
+@bot.tree.command(name="switch_model", description="Switch the AI model Woolgirl uses.")
+@app_commands.choices(model=[
+    app_commands.Choice(name="Groq (Free) - Llama 3.1 8B", value="groq:llama-3.1-8b-instant"),
+    app_commands.Choice(name="Groq (Free) - Llama 3 70B", value="groq:llama3-70b-8192"),
+    app_commands.Choice(name="OpenRouter (Paid) - GPT 4o-mini", value="openrouter:openai/gpt-4o-mini"),
+    app_commands.Choice(name="OpenRouter (Paid) - Gemini 1.5 Flash", value="openrouter:google/gemini-1.5-flash")
+])
+async def switch_model(interaction: discord.Interaction, model: app_commands.Choice[str]):
+    global active_api_provider, active_model_name
+    provider, model_name = model.value.split(":")
+    active_api_provider = provider
+    active_model_name = model_name
+    
+    info = ""
+    if model_name == "llama-3.1-8b-instant":
+        info = "🟢 **Cost:** 100% Free (Groq)\\n⏱️ **Speed:** Instantaneous\\n🚧 **Rate Limit:** 30 messages per minute (6,000 tokens/min)\\n🔄 **Refresh:** Rate limits reset every minute!"
+    elif model_name == "llama3-70b-8192":
+        info = "🟢 **Cost:** 100% Free (Groq)\\n⏱️ **Speed:** Very Fast\\n🚧 **Rate Limit:** 30 messages per minute (6,000 tokens/min)\\n🔄 **Refresh:** Rate limits reset every minute!"
+    elif model_name == "openai/gpt-4o-mini":
+        info = "🟡 **Cost:** Paid via OpenRouter ($0.15 per 1 Million tokens)\\n⏱️ **Speed:** Fast\\n🚧 **Rate Limit:** None (As long as you have funds)\\n🔄 **Refresh:** N/A"
+    elif model_name == "google/gemini-1.5-flash":
+        info = "🟡 **Cost:** Paid via OpenRouter ($0.07 per 1 Million tokens)\\n⏱️ **Speed:** Instantaneous (Fastest paid model)\\n🚧 **Rate Limit:** None (As long as you have funds)\\n🔄 **Refresh:** N/A"
+        
+    await interaction.response.send_message(f"Switched model to **{model.name}**!\\n\\n{info}", ephemeral=False)
 
 # Persona configuration
 SYSTEM_PROMPT = """You are Woolgirl, a classic tsundere anime girl.
@@ -195,7 +236,7 @@ New Conversation:
 {json.dumps(messages_to_compress)}"""
 
     try:
-        response = await ai_client.chat.completions.create(
+        response = await groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
@@ -226,8 +267,9 @@ async def force_ai_response(channel, system_prompt_addition):
     
     async with channel.typing():
         try:
-            response = client.chat.completions.create(
-                model="gpt-4o",
+            client = get_active_client()
+            response = await client.chat.completions.create(
+                model=active_model_name,
                 messages=[{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history[channel.id],
                 max_tokens=250,
                 temperature=0.9
@@ -514,8 +556,9 @@ async def on_message(message):
 
         async with message.channel.typing():
             try:
-                response = await ai_client.chat.completions.create(
-                    model="llama-3.1-8b-instant", 
+                client = get_active_client()
+                response = await client.chat.completions.create(
+                    model=active_model_name, 
                     messages=conversation_history[channel_id],
                 )
                 
