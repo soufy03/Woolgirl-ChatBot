@@ -788,6 +788,12 @@ async def handle_system_command(command, args, channel, channel_id):
             del conversation_history[channel_id]
         if channel_id in active_conversations:
             del active_conversations[channel_id]
+        if firebase_enabled:
+            try:
+                db.reference(f'conversations/{channel_id}/history').delete()
+                db.reference(f'conversations/{channel_id}/active_save').delete()
+            except Exception as e:
+                print(f"Failed to delete short term memory from Firebase on reset: {e}")
             
     elif command == "cancel_forget":
         if channel_id in bargaining_states:
