@@ -1479,6 +1479,23 @@ async def all_conversations(interaction: discord.Interaction):
 @bot.tree.command(name="reset", description="Erases my memory and deletes the chat history so we can start over.")
 async def reset(interaction: discord.Interaction):
     channel_id = interaction.channel_id
+    
+    name = active_conversations.get(channel_id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
+    safe_name = get_safe_filename(name)
+    
+    if firebase_enabled:
+        try:
+            db.reference(f"saves/{channel_id}/{safe_name}").delete()
+        except Exception as e:
+            print(f"Failed to delete save from Firebase on /reset: {e}")
+    else:
+        try:
+            filepath = f"saves/{channel_id}_{safe_name}.json"
+            if os.path.exists(filepath):
+                os.remove(filepath)
+        except Exception as e:
+            print(f"Failed to delete local save on /reset: {e}")
+            
     if channel_id in conversation_history:
         del conversation_history[channel_id]
     if channel_id in active_conversations:
