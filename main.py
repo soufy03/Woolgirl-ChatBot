@@ -535,14 +535,14 @@ async def force_ai_response(channel, system_prompt_addition, bypass_sleep=False)
             
             ai_response = re.sub(r'\[START_GAME:\s*(.+?)\]', '', ai_response, flags=re.IGNORECASE).strip()
             
-            cmd_match = re.search(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.+?))?\]', ai_response, re.IGNORECASE)
+            cmd_match = re.search(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.*))?\]', ai_response, re.IGNORECASE | re.DOTALL)
             sys_command = None
             sys_args = None
             
             if cmd_match:
                 sys_command = cmd_match.group(1).strip().lower()
                 sys_args = cmd_match.group(2).strip() if cmd_match.group(2) else None
-                ai_response = re.sub(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.+?))?\]', '', ai_response, flags=re.IGNORECASE).strip()
+                ai_response = re.sub(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.*))?\]', '', ai_response, flags=re.IGNORECASE | re.DOTALL).strip()
             
             target_history.append({"role": "assistant", "content": response.choices[0].message.content})
             
@@ -552,7 +552,10 @@ async def force_ai_response(channel, system_prompt_addition, bypass_sleep=False)
                 name = active_conversations.get(channel.id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
                 save_conversation(channel.id, name)
             
-            await channel.send(ai_response)
+            if ai_response:
+                chunks = [ai_response[i:i+1900] for i in range(0, len(ai_response), 1900)]
+                for chunk in chunks:
+                    await channel.send(chunk)
             
             if sys_command:
                 await handle_system_command(sys_command, sys_args, channel, channel.id)
@@ -860,9 +863,17 @@ async def handle_system_command(command, args, channel, channel_id):
             save_user_states()
             
     elif command == "generate_pdf":
-        parts = args.split("|", 1)
-        topic = parts[0].strip() if len(parts) > 0 else "document"
-        content = parts[1].strip() if len(parts) > 1 else "# Document\nNo content provided."
+        # Remove any leading pipes from args just in case the AI included one
+        clean_args = args.lstrip("|").strip()
+        parts = clean_args.split("|", 1)
+        
+        raw_topic = parts[0].strip() if len(parts) > 0 else "document"
+        if not raw_topic: raw_topic = "document"
+        
+        # Prevent massive topics from crashing Discord's 2000 char limit
+        topic = raw_topic[:50] + "..." if len(raw_topic) > 50 else raw_topic
+        
+        content = parts[1].strip() if len(parts) > 1 else raw_topic
         
         await channel.send(f"*[SYSTEM: Compiling your markdown into a physical PDF document regarding '{topic}'...]*")
         
@@ -901,10 +912,13 @@ async def handle_system_command(command, args, channel, channel_id):
             pdf.set_font("helvetica", size=12)
             pdf.write_html(html_content)
             
-            filename = f"{topic.replace(' ', '_')}.pdf"
+            filename_safe = re.sub(r'[^a-zA-Z0-9_\-]', '', topic.replace(' ', '_'))[:30]
+            if not filename_safe: filename_safe = "document"
+            filename = f"{filename_safe}.pdf"
+            
             pdf.output(filename)
             
-            await channel.send(f"Here is your stupid document about {topic}! Don't ask me to do this again!", file=discord.File(filename))
+            await channel.send(f"Here is your stupid document about '{topic}'! Don't ask me to do this again!", file=discord.File(filename))
             
             os.remove(filename)
             for tmp in temp_files:
@@ -1186,14 +1200,14 @@ async def on_message(message):
                     game_to_start = game_match.group(1).strip()
                     ai_response = re.sub(r'\[START_GAME:\s*(.+?)\]', '', ai_response, flags=re.IGNORECASE).strip()
 
-                cmd_match = re.search(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.+?))?\]', ai_response, re.IGNORECASE)
+                cmd_match = re.search(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.*))?\]', ai_response, re.IGNORECASE | re.DOTALL)
                 sys_command = None
                 sys_args = None
                 
                 if cmd_match:
                     sys_command = cmd_match.group(1).strip().lower()
                     sys_args = cmd_match.group(2).strip() if cmd_match.group(2) else None
-                    ai_response = re.sub(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.+?))?\]', '', ai_response, flags=re.IGNORECASE).strip()
+                    ai_response = re.sub(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.*))?\]', '', ai_response, flags=re.IGNORECASE | re.DOTALL).strip()
                 
                 print(f"PARSED CMD: {sys_command}, ARGS: {sys_args}")
 
@@ -1206,10 +1220,16 @@ async def on_message(message):
                 target_history.append({"role": "assistant", "content": response.choices[0].message.content})
                 
                 # Send the response back to Discord
-                if file_to_send:
-                    await message.reply(ai_response, file=file_to_send)
-                else:
-                    await message.reply(ai_response)
+                if ai_response:
+                    chunks = [ai_response[i:i+1900] for i in range(0, len(ai_response), 1900)]
+                    if file_to_send:
+                        await message.reply(chunks[0], file=file_to_send)
+                        for chunk in chunks[1:]:
+                            await message.channel.send(chunk)
+                    else:
+                        await message.reply(chunks[0])
+                        for chunk in chunks[1:]:
+                            await message.channel.send(chunk)
                     
                 # Trigger the game AFTER sending the AI's dialogue
                 if game_to_start:
