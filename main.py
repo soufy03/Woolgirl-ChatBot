@@ -784,16 +784,26 @@ async def handle_system_command(command, args, channel, channel_id):
             await channel.send(f"Are you blind? There is no save file named **'{name}'**! Ask to see all saves if you forgot!")
             
     elif command == "reset":
+        name = active_conversations.get(channel_id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
+        safe_name = get_safe_filename(name)
+        
+        if firebase_enabled:
+            try:
+                db.reference(f"saves/{channel_id}/{safe_name}").delete()
+            except Exception as e:
+                print(f"Failed to delete save from Firebase on reset: {e}")
+        else:
+            try:
+                filepath = f"saves/{channel_id}_{safe_name}.json"
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+            except Exception as e:
+                print(f"Failed to delete local save on reset: {e}")
+
         if channel_id in conversation_history:
             del conversation_history[channel_id]
         if channel_id in active_conversations:
             del active_conversations[channel_id]
-        if firebase_enabled:
-            try:
-                db.reference(f'conversations/{channel_id}/history').delete()
-                db.reference(f'conversations/{channel_id}/active_save').delete()
-            except Exception as e:
-                print(f"Failed to delete short term memory from Firebase on reset: {e}")
             
     elif command == "cancel_forget":
         if channel_id in bargaining_states:
