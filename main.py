@@ -1008,17 +1008,6 @@ async def on_message(message):
     if bot.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
         user_msg = message.content.replace(f'<@{bot.user.id}>', '').strip()
         
-        if user_msg == "!auditlogs":
-            try:
-                with open("audit_logs.txt", "r", encoding="utf-8") as f:
-                    logs = f.read()
-                if len(logs) > 1900:
-                    logs = logs[-1900:]
-                await message.channel.send(f"**Reevaluation Logs:**\n```\n{logs}\n```")
-            except:
-                await message.channel.send("No audit logs found yet.")
-            return
-            
         channel_id = message.channel.id
         
         is_dm = isinstance(message.channel, discord.DMChannel)
@@ -1064,7 +1053,7 @@ async def on_message(message):
         import time
         state_data["last_message_time"] = time.time()
         if state_data["state"] != "Asleep":
-            state_data["energy"] = max(0, state_data["energy"] - 2)
+            state_data["energy"] = max(0, state_data["energy"] - 1)
             if state_data["energy"] < 20 and state_data["state"] == "Awake":
                 state_data["state"] = "Tired"
             save_user_states()
@@ -1295,6 +1284,33 @@ async def diary(interaction: discord.Interaction):
         await interaction.response.send_message(embed=embed, ephemeral=True)
     else:
         await interaction.response.send_message("My diary is empty right now! Stop snooping!!", ephemeral=True)
+
+@bot.tree.command(name="system_status", description="Check Woolgirl's internal state and logs.")
+async def system_status(interaction: discord.Interaction):
+    channel_id = interaction.channel_id
+    energy = 100
+    state = "Awake"
+    if channel_id in user_states:
+        energy = user_states[channel_id].get("energy", 100)
+        state = user_states[channel_id].get("state", "Awake")
+        
+    logs = "No audit logs found yet."
+    try:
+        with open("audit_logs.txt", "r", encoding="utf-8") as f:
+            full_logs = f.read()
+        if len(full_logs) > 1000:
+            logs = full_logs[-1000:]
+        else:
+            logs = full_logs
+    except:
+        pass
+        
+    embed = discord.Embed(title="⚙️ System Status", color=0x00FF00)
+    embed.add_field(name="Current State", value=state, inline=True)
+    embed.add_field(name="Energy Level", value=f"{energy}%", inline=True)
+    embed.add_field(name="Last Reevaluation Logs", value=f"```\n{logs.strip() if logs.strip() else 'No recent logs.'}\n```", inline=False)
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="forget", description="Force Woolgirl to forget a specific numbered diary entry.")
 @app_commands.describe(number="The exact number of the diary entry to delete")
