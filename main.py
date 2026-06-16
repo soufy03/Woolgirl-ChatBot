@@ -212,6 +212,9 @@ Available commands:
 [COMMAND: confirm_forget <number>] - If you decide to let the user delete a memory out of your own free will, or if you were bargaining and the user forcefully insists, you MUST surrender and output this command to comply. Act sad or annoyed about losing it if you wanted to keep it.
 [COMMAND: cancel_forget] - If you were bargaining to keep a memory, and you win the argument (the user gives up and agrees to let you keep it), you MUST output this command to end the argument and return to normal chat.
 [COMMAND: set_sleep_timer <hours>] - Use this to decide exactly how many hours you want to sleep when you are tired. E.g. [COMMAND: set_sleep_timer 6].
+[COMMAND: set_energy <0-100>] - Use to manually set your energy level. You have the technical ability to do this, but ONLY do it if the user explicitly overrides your limits.
+[COMMAND: set_state <Awake/Tired/Asleep>] - Use to manually force your Tamagotchi state to change.
+[COMMAND: generate_pdf <topic>] - Use to simulate generating a PDF document for the user if they demand one.
 
 Example:
 User: "Can we start a new save called beach episode?"
@@ -840,6 +843,25 @@ async def handle_system_command(command, args, channel, channel_id):
                 })
                 name = active_conversations.get(channel_id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
                 save_conversation(channel_id, name)
+
+    elif command == "set_energy":
+        try:
+            amt = int(args)
+            if channel_id in user_states:
+                user_states[channel_id]["energy"] = max(0, min(100, amt))
+                save_user_states()
+        except: pass
+        
+    elif command == "set_state":
+        state = args.capitalize()
+        if state in ["Awake", "Tired", "Asleep"] and channel_id in user_states:
+            user_states[channel_id]["state"] = state
+            save_user_states()
+            
+    elif command == "generate_pdf":
+        topic = args if args else "document"
+        filename = topic.replace(' ', '_')
+        await channel.send(f"*[SYSTEM: Generating a PDF document regarding '{topic}'...]*\n\n📄 **[Click here to download {filename}.pdf]**\n*(Note: This is a simulated file roleplay.)*")
 
 async def tamagotchi_watchdog():
     import time
