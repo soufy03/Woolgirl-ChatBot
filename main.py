@@ -209,6 +209,7 @@ Available commands:
 [COMMAND: reset] - Use this when the user wants to completely erase your memory and start over without saving.
 [COMMAND: confirm_forget <number>] - If you decide to let the user delete a memory out of your own free will, or if you were bargaining and the user forcefully insists, you MUST surrender and output this command to comply. Act sad or annoyed about losing it if you wanted to keep it.
 [COMMAND: cancel_forget] - If you were bargaining to keep a memory, and you win the argument (the user gives up and agrees to let you keep it), you MUST output this command to end the argument and return to normal chat.
+[COMMAND: set_sleep_timer <hours>] - Use this to decide exactly how many hours you want to sleep when you are tired. E.g. [COMMAND: set_sleep_timer 6].
 
 Example:
 User: "Can we start a new save called beach episode?"
@@ -220,7 +221,28 @@ conversation_history = {}
 active_conversations = {}
 global_diaries = {}
 bargaining_states = {}
-MAX_HISTORY = 20 
+user_states = {}
+MAX_HISTORY = 20
+USER_STATES_FILE = "user_states.json"
+
+def save_user_states():
+    try:
+        with open(USER_STATES_FILE, "w") as f:
+            json.dump(user_states, f)
+    except Exception as e:
+        print(f"Failed to save user states: {e}")
+
+def load_user_states():
+    global user_states
+    try:
+        if os.path.exists(USER_STATES_FILE):
+            with open(USER_STATES_FILE, "r") as f:
+                loaded = json.load(f)
+                user_states = {int(k): v for k, v in loaded.items()}
+    except Exception as e:
+        print(f"Failed to load user states: {e}")
+
+load_user_states() 
 
 def get_global_diary(channel_id):
     if channel_id in global_diaries:
@@ -420,7 +442,7 @@ def inject_game_memory(channel_id, result_text):
         save_conversation(channel_id, name)
         bot.loop.create_task(compress_memory(channel_id))
 
-async def force_ai_response(channel, system_prompt_addition):
+async def force_ai_response(channel, system_prompt_addition, bypass_sleep=False):
     import re
     is_bargaining = channel.id in bargaining_states
     
@@ -441,7 +463,24 @@ async def force_ai_response(channel, system_prompt_addition):
                 
             current_time = datetime.datetime.now().strftime("%I:%M %p")
             current_date = datetime.date.today().strftime("%B %d, %Y")
-            time_injection = f"\n\n[CURRENT REAL-WORLD TIME: {current_time} | DATE: {current_date}]"
+            if channel.id in user_states:
+                state_data = user_states[channel.id]
+                current_state = state_data["state"]
+                energy = state_data["energy"]
+                missed = state_data["missed_messages"]
+                
+                state_injection = f"\n\n[CURRENT STATE: {current_state} | ENERGY: {energy}%]"
+                if current_state == "Tired":
+                    state_injection += " You are exhausted, yawning, and sleepy. You want to go to sleep."
+                if missed > 0:
+                    state_injection += f"\n[MISSED MESSAGES BUFFER: You just woke up at {current_time}. While you were asleep, the user tried to text you {missed} times. You can react to this.]"
+                    if current_state != "Asleep":
+                        state_data["missed_messages"] = 0
+                        save_user_states()
+                        
+                time_injection = f"\n\n[CURRENT REAL-WORLD TIME: {current_time} | DATE: {current_date}]{state_injection}"
+            else:
+                time_injection = f"\n\n[CURRENT REAL-WORLD TIME: {current_time} | DATE: {current_date}]"
             
             diary = get_global_diary(channel.id)
             if diary:
@@ -749,8 +788,97 @@ async def handle_system_command(command, args, channel, channel_id):
             await channel.purge(limit=100)
             await channel.send("I erased my memory and deleted the recent chat history. Happy now?!", delete_after=10)
 
+    elif command == "set_sleep_timer":
+        try:
+            hours = float(args)
+        except:
+            hours = 6.0
+            
+        if channel_id in user_states:
+            import time
+            state_data = user_states[channel_id]
+            state_data["state"] = "Asleep"
+            state_data["wake_up_time"] = time.time() + (hours * 3600)
+            state_data["missed_messages"] = 0
+            save_user_states()
+            print(f"User {channel_id} went to sleep for {hours} hours.")
+            
+            if channel_id in conversation_history:
+                conversation_history[channel_id].append({
+                    "role": "system",
+                    "content": f"[SYSTEM NOTIFICATION: You just fell asleep for {hours} hours. You are currently ASLEEP.]"
+                })
+                name = active_conversations.get(channel_id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
+                save_conversation(channel_id, name)
+
+async def tamagotchi_watchdog():
+    import time
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        now = time.time()
+        for channel_id, state_data in list(user_states.items()):
+            channel = bot.get_channel(channel_id)
+            if not channel:
+                try:
+                    channel = await bot.fetch_channel(channel_id)
+                except:
+                    continue
+            if not channel: continue
+            
+            c_state = state_data.get("state", "Awake")
+            last_msg = state_data.get("last_message_time", now)
+            
+            if c_state == "Tired":
+                if now - last_msg > 600:
+                    prompt = "You have been exhausted and tired for 10 minutes. The user hasn't messaged you. You are now falling asleep. Output [COMMAND: set_sleep_timer <hours>] to decide exactly how many hours you want to sleep (average is 6, but it's up to your free will). Do NOT output anything else."
+                    bot.loop.create_task(force_ai_response(channel, prompt, bypass_sleep=True))
+                    state_data["last_message_time"] = now
+                    save_user_states()
+            
+            elif c_state == "Asleep":
+                wake_time = state_data.get("wake_up_time", 0)
+                if now > wake_time and wake_time > 0:
+                    state_data["state"] = "Awake"
+                    state_data["energy"] = 100
+                    state_data["last_message_time"] = now
+                    save_user_states()
+                    
+                    prompt = "You just woke up from a long sleep. Your energy is fully restored to 100%. Check your MISSED MESSAGES buffer if you have one, and send the user a message now that you are awake."
+                    bot.loop.create_task(force_ai_response(channel, prompt, bypass_sleep=True))
+                    
+            elif c_state == "Awake":
+                target_idle = state_data.get("idle_ping_target", 18000)
+                if now - last_msg > target_idle:
+                    prompt = "You haven't heard from the user in a long time. Send them a spontaneous text message checking in on them (tsundere style). Do not mention that you were prompted to do this."
+                    bot.loop.create_task(force_ai_response(channel, prompt, bypass_sleep=True))
+                    state_data["last_message_time"] = now
+                    state_data["idle_ping_target"] = random.randint(3, 7) * 3600
+                    save_user_states()
+        await asyncio.sleep(60)
+
+async def update_discord_status():
+    await bot.wait_until_ready()
+    awake_activities = ["Crazy Revolver Cards", "Watching you (don't flatter yourself)", "Listening to Lo-Fi", "Ignoring you"]
+    while not bot.is_closed():
+        global_state = "Awake"
+        if user_states:
+            latest_user = max(user_states.values(), key=lambda x: x.get("last_message_time", 0))
+            global_state = latest_user.get("state", "Awake")
+            
+        if global_state == "Awake":
+            activity_name = random.choice(awake_activities)
+            await bot.change_presence(activity=discord.Game(name=activity_name), status=discord.Status.online)
+        elif global_state == "Tired":
+            await bot.change_presence(activity=discord.Game(name="Being tired..."), status=discord.Status.idle)
+        elif global_state == "Asleep":
+            await bot.change_presence(activity=discord.Game(name="Sleeping (Zzz...)"), status=discord.Status.dnd)
+            
+        await asyncio.sleep(600)
+
 @bot.event
 async def on_ready():
+    bot.loop.create_task(tamagotchi_watchdog())
+    bot.loop.create_task(update_discord_status())
     print(f'Logged in as {bot.user.name} ({bot.user.id})')
     print('Tsundere bot is hooked up to the internet for GIFs!')
     
@@ -780,6 +908,48 @@ async def on_message(message):
         is_bargaining = channel_id in bargaining_states
         target_history = bargaining_states[channel_id] if is_bargaining else conversation_history.setdefault(channel_id, [{"role": "system", "content": SYSTEM_PROMPT}])
 
+        if channel_id not in user_states:
+            import time
+            user_states[channel_id] = {
+                "energy": 100,
+                "state": "Awake",
+                "missed_messages": 0,
+                "last_message_time": time.time(),
+                "wake_up_time": 0,
+                "idle_ping_target": random.randint(3, 7) * 3600
+            }
+            save_user_states()
+
+        state_data = user_states[channel_id]
+        
+        # Intercept messages if asleep
+        if state_data["state"] == "Asleep" and not is_bargaining:
+            state_data["missed_messages"] += 1
+            save_user_states()
+            
+            sleep_msgs = [
+                "Zzz... *mumbles* no, baka... leave my pudding alone...",
+                "*soft snoring sounds* (She is deeply asleep)",
+                "Zzz... five more minutes...",
+                "*She is dead to the world, drooling slightly on her desk.*",
+                "Zzz... idiot...",
+                "(She doesn't respond. She's fast asleep.)"
+            ]
+            sleep_msg = random.choice(sleep_msgs)
+            
+            embed = discord.Embed(description=sleep_msg, color=0x2b2d31)
+            embed.set_image(url="https://media1.tenor.com/m/Z2yPjXz4pXQAAAAC/anime-sleep.gif")
+            await message.channel.send(embed=embed)
+            return
+
+        import time
+        state_data["last_message_time"] = time.time()
+        if state_data["state"] != "Asleep":
+            state_data["energy"] = max(0, state_data["energy"] - 2)
+            if state_data["energy"] < 20 and state_data["state"] == "Awake":
+                state_data["state"] = "Tired"
+            save_user_states()
+
         # Check for images
         if message.attachments:
             img_url = message.attachments[0].url
@@ -804,7 +974,21 @@ async def on_message(message):
                 payload_history = list(target_history)
                 current_time = datetime.datetime.now().strftime("%I:%M %p")
                 current_date = datetime.date.today().strftime("%B %d, %Y")
-                time_injection = f"\n\n[CURRENT REAL-WORLD TIME: {current_time} | DATE: {current_date}]"
+                
+                current_state = state_data["state"]
+                energy = state_data["energy"]
+                missed = state_data["missed_messages"]
+                
+                state_injection = f"\n\n[CURRENT STATE: {current_state} | ENERGY: {energy}%]"
+                if current_state == "Tired":
+                    state_injection += " You are exhausted, yawning, and sleepy. You want to go to sleep."
+                if missed > 0:
+                    state_injection += f"\n[MISSED MESSAGES BUFFER: You just woke up at {current_time}. While you were asleep, the user tried to text you {missed} times. You can react to this.]"
+                    if current_state != "Asleep":
+                        state_data["missed_messages"] = 0
+                        save_user_states()
+                
+                time_injection = f"\n\n[CURRENT REAL-WORLD TIME: {current_time} | DATE: {current_date}]{state_injection}"
                 
                 diary = get_global_diary(channel_id)
                 if diary:
