@@ -536,6 +536,12 @@ async def force_ai_response(channel, system_prompt_addition, bypass_sleep=False)
             )
             ai_response = response.choices[0].message.content
             
+            print(f"\n=== BACKGROUND / SYSTEM EVENT ===")
+            print(f"PROMPT: {prompt}")
+            print(f"--- WOOLGIRL'S RAW INTERNAL THOUGHTS ---")
+            print(f"{ai_response}")
+            print(f"=======================================\n")
+            
             ai_response = re.sub(r'\[START_GAME:\s*(.+?)\]', '', ai_response, flags=re.IGNORECASE).strip()
             
             cmd_match = re.search(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.*))?', ai_response, re.IGNORECASE | re.DOTALL)
@@ -1166,8 +1172,13 @@ async def on_message(message):
                     )
                     response_msg = response.choices[0].message
                 
-                ai_response = response_msg.content
-                print(f"AI RAW RESPONSE: {ai_response}")
+                ai_response = response.choices[0].message.content
+                
+                print(f"\n=== NEW MESSAGE FROM {message.author.display_name} ===")
+                print(f"USER: {user_msg}")
+                print(f"--- WOOLGIRL'S RAW INTERNAL THOUGHTS ---")
+                print(f"{ai_response}")
+                print(f"=======================================================\n")
                 
                 # Parse for the GIF search tag
                 gif_match = re.search(r'[\[\(]GIF:\s*(.+?)[\]\)]', ai_response, re.IGNORECASE)
@@ -1217,7 +1228,8 @@ async def on_message(message):
                         sys_args = sys_args.rstrip('])')
                     ai_response = re.sub(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.*))?', '', ai_response, flags=re.IGNORECASE | re.DOTALL).strip()
                 
-                print(f"PARSED CMD: {sys_command}, ARGS: {sys_args}")
+                if sys_command:
+                    print(f"[SYSTEM COMMAND DETECTED]: {sys_command} | ARGS: {sys_args}")
 
                 if is_dm and not has_active_save and not sys_command and not is_bargaining:
                     await message.reply("Hmph! We don't have an active save file right now! You need to use `/new` to create a new conversation, or `/all_conversations` to load an old one before we can talk.")
