@@ -434,7 +434,8 @@ Based entirely on your own free will, personality, and current feelings:
       C) Leave it as [Useless (1)] if you are extremely conflicted and want to pause its timer for one more cycle.
       D) Upgrade it to [Normal] (removing the number).
    - If you see a [Useless (0)] memory, you MUST permanently delete it by completely omitting it from your output!
-4. Keep the exact same numbering for the entries you keep. Do NOT renumber them!
+4. CONSOLIDATION: If you see multiple memories that contain duplicate information or refer to the exact same event, you MUST combine them into a single, comprehensive memory entry, and permanently delete the redundant ones to save space!
+5. Keep the exact same numbering for the entries you keep. Do NOT renumber them!
 
 CRITICAL RULES:
 - Output the revised numbered list first.
