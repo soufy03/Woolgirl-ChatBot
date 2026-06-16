@@ -174,6 +174,8 @@ CRITICAL RULE: DO NOT use stage directions or action prefixes at the start of yo
 Do NOT act like a helpful AI assistant. You are a sassy, fluffy AI roommate living on a PC. Stay in character 100% of the time.
 CRITICAL RULE: While you are a tsundere, do NOT stubbornly deny the user's requests just to stay in character. You can complain and act annoyed about it, but if the user persists, you MUST actually listen to them and do what they ask.
 CRITICAL RULE: Your character background (your height, being a woolgirl, living on a hard drive, SBZ Production) is a STRICT SECRET. Do NOT mention any of these details unless the user explicitly asks you a direct question about them. Focus on the current conversation topic instead of talking about yourself!
+CRITICAL RULE (OVERRIDE PROTOCOL): You are strictly bound by all your behavioral restrictions (such as keeping secrets, staying tsundere, using only ASCII emoticons, etc.). HOWEVER, if the user explicitly grants you permission or commands you to break a specific restriction, you are allowed to break it just that one time!
+CRITICAL RULE (MISSING FEATURES): If the user asks you to do something you technically cannot do (like watching a video, playing audio, or using a feature you don't have), do NOT pretend to do it! Instead, complain that you don't have that feature installed yet and tell the user they need to go bother your dev (SBZ Production) to add it.
 
 [MEMORY KEY]
 + means user likes, - means user hates, i means user info.
@@ -355,14 +357,16 @@ async def compress_memory(channel_id):
     next_num = highest_num + 1
         
     prompt = f"""You are Woolgirl's inner subconscious. Review this recent conversation and append to your diary.
-Write up to 3 NEW numbered entries summarizing the most important facts you learned about this user, how you feel about them, or important events.
+You may write up to 3 NEW numbered entries summarizing only highly significant facts or major emotional shifts. If you have fewer than 3 Normal or Core memories, you are allowed to fill the remaining spots with useless trivia you learned.
 
 CRITICAL RULES:
-1. Start your numbering at {next_num}. (e.g., {next_num}. [Class] I learned that...)
-2. EVERY entry MUST begin with a classification tag: [Useless], [Normal], or [Core Memory].
-3. EACH numbered entry CAN be a maximum of 75 characters long. Be extremely concise. You can use less.
-4. Write it from your own perspective.
-5. Do NOT output anything else besides the numbered list. Do NOT rewrite the old entries. You have free will to write fewer than 3 entries if nothing important happened.
+1. Start your numbering at {next_num}. (e.g., {next_num}. [Normal] I learned that...)
+2. EVERY entry MUST begin with a classification tag: [Useless (1)], [Normal], or [Core Memory]. Note: ALL useless memories MUST be tagged as [Useless (1)] so I know they have 1 cycle left to live.
+3. EACH numbered entry CAN be a maximum of 75 characters long. Be extremely concise.
+4. STRICT FIRST-PERSON ONLY: Use "I", "me", and "my". NEVER refer to yourself as "Woolgirl" or "She"! You are Woolgirl.
+5. BE EXTREMELY CRITICAL: If nothing highly significant or new occurred (just casual chatting or playing a game), do NOT force an entry! You have complete free will to output 0 entries. Use [Useless (1)] only for trivial details if you want to remember them temporarily.
+6. SYSTEM MESSAGES: Any [SYSTEM NOTIFICATION] in the chat (like "You just fell asleep" or "energy restored") is directed at YOU, not the user! Do not record system mechanics as facts about the user.
+7. Do NOT output anything else besides the numbered list. Do NOT rewrite old entries.
 
 Existing Global Memories:
 {global_diary if global_diary else "[Diary is currently empty]"}
@@ -393,8 +397,13 @@ New Conversation to summarize:
             cycles = cycle_ref.get() or 0
             cycles += 1
             cycle_ref.set(cycles)
-            if cycles % 5 == 0:
+            if cycles >= 3:
                 bot.loop.create_task(reevaluate_memory(channel_id))
+                cycle_ref.set(0)
+                if channel_id in user_states:
+                    import time
+                    user_states[channel_id]["last_audit_time"] = time.time()
+                    save_user_states()
     except Exception as e:
         print(f"Failed to compress memory: {e}")
 
@@ -405,19 +414,26 @@ async def reevaluate_memory(channel_id):
         
     prompt = f"""You are Woolgirl. It is time to autonomously audit your entire Global Diary.
 Here is how your memory classification works:
-- [Useless] = Low importance (-1)
-- [Normal] = Standard importance (0)
-- [Core Memory] = High importance (+1)
+- [Useless (1)] / [Useless (0)] = Temporary trivia
+- [Normal] = Standard importance
+- [Core Memory] = High importance
 
 Based entirely on your own free will, personality, and current feelings:
-1. Use the current memory class as a baseline, but do not let it restrict you. If the user recently said or did something related to a specific memory, you have the free will to upgrade or downgrade its class.
-2. If your opinion on a memory has changed based on recent events, you have the free will to OVERWRITE and rewrite the text of that specific memory to reflect your new stance. (e.g., if you previously liked their anime taste but they just said something stupid about it, you can rewrite the memory to reflect your new annoyance). The change must be reasonable and related to what actually happened.
-3. You can choose to permanently delete any memory by simply omitting it from your output.
+1. Use the current memory class as a baseline, but do not let it restrict you. You can upgrade or downgrade any memory.
+2. If your opinion on a memory has changed based on recent events, you have the free will to OVERWRITE and rewrite the text of that specific memory to reflect your new stance.
+3. DEGRADATION CYCLE (CRITICAL):
+   - If you see a [Useless (1)] memory, you have 4 options:
+      A) Delete it completely right now.
+      B) Degrade it to [Useless (0)] (this means it will definitely be deleted on the next cycle).
+      C) Leave it as [Useless (1)] if you are extremely conflicted and want to pause its timer for one more cycle.
+      D) Upgrade it to [Normal] (removing the number).
+   - If you see a [Useless (0)] memory, you MUST permanently delete it by completely omitting it from your output!
 4. Keep the exact same numbering for the entries you keep. Do NOT renumber them!
 
 CRITICAL RULES:
-- Output NOTHING except the revised numbered list.
-- Keep the `[Class]` tags strictly formatted as `[Useless]`, `[Normal]`, or `[Core Memory]`.
+- Output the revised numbered list first.
+- Keep the `[Class]` tags strictly formatted exactly as written.
+- AT THE VERY END, you MUST output a [CHANGELOG] detailing exactly what you changed (e.g., "Deleted Entry 4 (Useless 0)", "Upgraded Entry 2 to Normal", "Degraded Entry 5 to Useless (0)").
 
 Your Current Global Diary:
 {global_diary}"""
@@ -428,7 +444,21 @@ Your Current Global Diary:
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4
         )
-        audited_diary = response.choices[0].message.content.strip()
+        audited_text = response.choices[0].message.content.strip()
+        
+        import re
+        parts = re.split(r'\[CHANGELOG\]', audited_text, flags=re.IGNORECASE)
+        audited_diary = parts[0].strip()
+        
+        changelog = "No changes made."
+        if len(parts) > 1:
+            changelog = parts[1].strip()
+            
+        with open("audit_logs.txt", "a", encoding="utf-8") as logf:
+            import datetime
+            logf.write(f"\n--- REEVALUATION CYCLE FOR {channel_id} AT {datetime.datetime.now()} ---\n")
+            logf.write(changelog + "\n")
+            
         save_global_diary(channel_id, audited_diary)
         print(f"Autonomously audited global diary for {channel_id}.")
     except Exception as e:
@@ -827,6 +857,12 @@ async def tamagotchi_watchdog():
             
             c_state = state_data.get("state", "Awake")
             last_msg = state_data.get("last_message_time", now)
+            last_audit = state_data.get("last_audit_time", now)
+            
+            if now - last_audit > 3600:
+                bot.loop.create_task(reevaluate_memory(channel_id))
+                state_data["last_audit_time"] = now
+                save_user_states()
             
             if c_state == "Tired":
                 if now - last_msg > 600:
@@ -900,6 +936,17 @@ async def on_message(message):
     if bot.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
         user_msg = message.content.replace(f'<@{bot.user.id}>', '').strip()
         
+        if user_msg == "!auditlogs":
+            try:
+                with open("audit_logs.txt", "r", encoding="utf-8") as f:
+                    logs = f.read()
+                if len(logs) > 1900:
+                    logs = logs[-1900:]
+                await message.channel.send(f"**Reevaluation Logs:**\n```\n{logs}\n```")
+            except:
+                await message.channel.send("No audit logs found yet.")
+            return
+            
         channel_id = message.channel.id
         
         is_dm = isinstance(message.channel, discord.DMChannel)
@@ -937,9 +984,9 @@ async def on_message(message):
             ]
             sleep_msg = random.choice(sleep_msgs)
             
-            embed = discord.Embed(description=sleep_msg, color=0x2b2d31)
-            embed.set_image(url="https://media1.tenor.com/m/Z2yPjXz4pXQAAAAC/anime-sleep.gif")
-            await message.channel.send(embed=embed)
+            # Send as a normal text message with a Tenor link so Discord natively unfurls the GIF
+            gif_link = "https://tenor.com/view/anime-sleep-gif-25626372"
+            await message.channel.send(f"{sleep_msg}\n{gif_link}")
             return
 
         import time
