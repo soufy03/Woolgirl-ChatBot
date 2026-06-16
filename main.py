@@ -216,6 +216,8 @@ Available commands:
 [COMMAND: set_state <Awake/Tired/Asleep>] - Use to manually force your Tamagotchi state to change.
 [COMMAND: generate_pdf | Topic Name | Content...] - Use to generate a physical PDF document. 
 * You MUST format the Content using Markdown! Use `#` for headers, `**` for bold, and `*` for italics.
+* CRITICAL: You MUST use multiple lines (press Enter) inside the Content to separate your paragraphs and headers! Do not write the entire document on a single line!
+* CRITICAL: DO NOT write the document out loud in the chat first! Only write the document INSIDE the command tag! If you write it twice, you are wasting energy!
 * If you want to include an image, search DuckDuckGo for one, find its URL, and embed it using standard markdown syntax: `![alt text](https://image.url)`. Do NOT use fake image links, they will fail to load!
 Example:
 User: "Can we start a new save called beach episode?"
