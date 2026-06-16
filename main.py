@@ -535,14 +535,16 @@ async def force_ai_response(channel, system_prompt_addition, bypass_sleep=False)
             
             ai_response = re.sub(r'\[START_GAME:\s*(.+?)\]', '', ai_response, flags=re.IGNORECASE).strip()
             
-            cmd_match = re.search(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.*))?\]', ai_response, re.IGNORECASE | re.DOTALL)
+            cmd_match = re.search(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.*))?', ai_response, re.IGNORECASE | re.DOTALL)
             sys_command = None
             sys_args = None
             
             if cmd_match:
                 sys_command = cmd_match.group(1).strip().lower()
                 sys_args = cmd_match.group(2).strip() if cmd_match.group(2) else None
-                ai_response = re.sub(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.*))?\]', '', ai_response, flags=re.IGNORECASE | re.DOTALL).strip()
+                if sys_args:
+                    sys_args = sys_args.rstrip('])')
+                ai_response = re.sub(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.*))?', '', ai_response, flags=re.IGNORECASE | re.DOTALL).strip()
             
             target_history.append({"role": "assistant", "content": response.choices[0].message.content})
             
@@ -1200,14 +1202,16 @@ async def on_message(message):
                     game_to_start = game_match.group(1).strip()
                     ai_response = re.sub(r'\[START_GAME:\s*(.+?)\]', '', ai_response, flags=re.IGNORECASE).strip()
 
-                cmd_match = re.search(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.*))?\]', ai_response, re.IGNORECASE | re.DOTALL)
+                cmd_match = re.search(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.*))?', ai_response, re.IGNORECASE | re.DOTALL)
                 sys_command = None
                 sys_args = None
                 
                 if cmd_match:
                     sys_command = cmd_match.group(1).strip().lower()
                     sys_args = cmd_match.group(2).strip() if cmd_match.group(2) else None
-                    ai_response = re.sub(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.*))?\]', '', ai_response, flags=re.IGNORECASE | re.DOTALL).strip()
+                    if sys_args:
+                        sys_args = sys_args.rstrip('])')
+                    ai_response = re.sub(r'\[COMMAND:\s*([a-zA-Z_]+)(?:\s+(.*))?', '', ai_response, flags=re.IGNORECASE | re.DOTALL).strip()
                 
                 print(f"PARSED CMD: {sys_command}, ARGS: {sys_args}")
 
