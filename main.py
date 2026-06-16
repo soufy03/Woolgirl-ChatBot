@@ -785,25 +785,10 @@ async def handle_system_command(command, args, channel, channel_id):
             
     elif command == "reset":
         name = active_conversations.get(channel_id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
-        safe_name = get_safe_filename(name)
         
-        if firebase_enabled:
-            try:
-                db.reference(f"saves/{channel_id}/{safe_name}").delete()
-            except Exception as e:
-                print(f"Failed to delete save from Firebase on reset: {e}")
-        else:
-            try:
-                filepath = f"saves/{channel_id}_{safe_name}.json"
-                if os.path.exists(filepath):
-                    os.remove(filepath)
-            except Exception as e:
-                print(f"Failed to delete local save on reset: {e}")
-
-        if channel_id in conversation_history:
-            del conversation_history[channel_id]
-        if channel_id in active_conversations:
-            del active_conversations[channel_id]
+        # Keep the save file, but wipe all message history back to the original System Prompt
+        conversation_history[channel_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        save_conversation(channel_id, name)
             
     elif command == "cancel_forget":
         if channel_id in bargaining_states:
@@ -1481,25 +1466,10 @@ async def reset(interaction: discord.Interaction):
     channel_id = interaction.channel_id
     
     name = active_conversations.get(channel_id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
-    safe_name = get_safe_filename(name)
     
-    if firebase_enabled:
-        try:
-            db.reference(f"saves/{channel_id}/{safe_name}").delete()
-        except Exception as e:
-            print(f"Failed to delete save from Firebase on /reset: {e}")
-    else:
-        try:
-            filepath = f"saves/{channel_id}_{safe_name}.json"
-            if os.path.exists(filepath):
-                os.remove(filepath)
-        except Exception as e:
-            print(f"Failed to delete local save on /reset: {e}")
-            
-    if channel_id in conversation_history:
-        del conversation_history[channel_id]
-    if channel_id in active_conversations:
-        del active_conversations[channel_id]
+    # Keep the save file, but wipe all message history back to the original System Prompt
+    conversation_history[channel_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    save_conversation(channel_id, name)
         
     await interaction.response.defer()
     
