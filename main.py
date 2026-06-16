@@ -214,8 +214,9 @@ Available commands:
 [COMMAND: set_sleep_timer <hours>] - Use this to decide exactly how many hours you want to sleep when you are tired. E.g. [COMMAND: set_sleep_timer 6].
 [COMMAND: set_energy <0-100>] - Use to manually set your energy level. You have the technical ability to do this, but ONLY do it if the user explicitly overrides your limits.
 [COMMAND: set_state <Awake/Tired/Asleep>] - Use to manually force your Tamagotchi state to change.
-[COMMAND: generate_pdf <topic>] - Use to simulate generating a PDF document for the user if they demand one.
-
+[COMMAND: generate_pdf | Topic Name | Content...] - Use to generate a physical PDF document. 
+* You MUST format the Content using Markdown! Use `#` for headers, `**` for bold, and `*` for italics.
+* If you want to include an image, search DuckDuckGo for one, find its URL, and embed it using standard markdown syntax: `![alt text](https://image.url)`. Do NOT use fake image links, they will fail to load!
 Example:
 User: "Can we start a new save called beach episode?"
 Woolgirl: "Ugh, fine! I'll wipe my memory and we can start your stupid beach episode. Don't be a creep! [COMMAND: new beach episode]"
@@ -859,9 +860,58 @@ async def handle_system_command(command, args, channel, channel_id):
             save_user_states()
             
     elif command == "generate_pdf":
-        topic = args if args else "document"
-        filename = topic.replace(' ', '_')
-        await channel.send(f"*[SYSTEM: Generating a PDF document regarding '{topic}'...]*\n\n📄 **[Click here to download {filename}.pdf]**\n*(Note: This is a simulated file roleplay.)*")
+        parts = args.split("|", 1)
+        topic = parts[0].strip() if len(parts) > 0 else "document"
+        content = parts[1].strip() if len(parts) > 1 else "# Document\nNo content provided."
+        
+        await channel.send(f"*[SYSTEM: Compiling your markdown into a physical PDF document regarding '{topic}'...]*")
+        
+        try:
+            import markdown
+            import re
+            import aiohttp
+            import os
+            import uuid
+            from fpdf import FPDF
+            
+            img_pattern = re.compile(r'!\[.*?\]\((.*?)\)')
+            urls = img_pattern.findall(content)
+            temp_files = []
+            
+            async with aiohttp.ClientSession() as session:
+                for url in urls:
+                    try:
+                        async with session.get(url, timeout=5) as resp:
+                            if resp.status == 200:
+                                ext = url.split('.')[-1].lower()
+                                if ext not in ['jpg', 'jpeg', 'png', 'gif']:
+                                    ext = 'jpg'
+                                temp_filename = f"temp_img_{uuid.uuid4().hex}.{ext}"
+                                with open(temp_filename, 'wb') as f:
+                                    f.write(await resp.read())
+                                temp_files.append(temp_filename)
+                                content = content.replace(url, temp_filename)
+                    except Exception as e:
+                        print(f"Failed to download image {url}: {e}")
+                        
+            html_content = markdown.markdown(content)
+            
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("helvetica", size=12)
+            pdf.write_html(html_content)
+            
+            filename = f"{topic.replace(' ', '_')}.pdf"
+            pdf.output(filename)
+            
+            await channel.send(f"Here is your stupid document about {topic}! Don't ask me to do this again!", file=discord.File(filename))
+            
+            os.remove(filename)
+            for tmp in temp_files:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+        except Exception as e:
+            await channel.send(f"*[SYSTEM ERROR: Failed to generate PDF: {e}]*")
 
 async def tamagotchi_watchdog():
     import time
