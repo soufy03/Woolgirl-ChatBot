@@ -439,9 +439,15 @@ async def force_ai_response(channel, system_prompt_addition):
             if len(payload_history) > 0 and payload_history[0].get("role") != "system":
                 payload_history.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
                 
+            current_time = datetime.datetime.now().strftime("%I:%M %p")
+            current_date = datetime.date.today().strftime("%B %d, %Y")
+            time_injection = f"\n\n[CURRENT REAL-WORLD TIME: {current_time} | DATE: {current_date}]"
+            
             diary = get_global_diary(channel.id)
             if diary:
-                payload_history[0] = {"role": "system", "content": f"{SYSTEM_PROMPT}\n\n[GLOBAL SUBCONSCIOUS DIARY]\n{diary}"}
+                payload_history[0] = {"role": "system", "content": f"{SYSTEM_PROMPT}{time_injection}\n\n[GLOBAL SUBCONSCIOUS DIARY]\n{diary}"}
+            else:
+                payload_history[0] = {"role": "system", "content": f"{SYSTEM_PROMPT}{time_injection}"}
                 
             if active_api_provider == "groq":
                 payload_history = sanitize_history_for_groq(payload_history)
@@ -796,9 +802,15 @@ async def on_message(message):
                 client = get_active_client()
                 
                 payload_history = list(target_history)
+                current_time = datetime.datetime.now().strftime("%I:%M %p")
+                current_date = datetime.date.today().strftime("%B %d, %Y")
+                time_injection = f"\n\n[CURRENT REAL-WORLD TIME: {current_time} | DATE: {current_date}]"
+                
                 diary = get_global_diary(channel_id)
                 if diary:
-                    payload_history[0] = {"role": "system", "content": f"{SYSTEM_PROMPT}\n\n[GLOBAL SUBCONSCIOUS DIARY]\n{diary}"}
+                    payload_history[0] = {"role": "system", "content": f"{SYSTEM_PROMPT}{time_injection}\n\n[GLOBAL SUBCONSCIOUS DIARY]\n{diary}"}
+                else:
+                    payload_history[0] = {"role": "system", "content": f"{SYSTEM_PROMPT}{time_injection}"}
                     
                 if active_api_provider == "groq":
                     payload_history = sanitize_history_for_groq(payload_history)
