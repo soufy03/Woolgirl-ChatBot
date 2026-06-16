@@ -333,14 +333,14 @@ async def compress_memory(channel_id):
     next_num = highest_num + 1
         
     prompt = f"""You are Woolgirl's inner subconscious. Review this recent conversation and append to your diary.
-Write up to 6 NEW numbered entries summarizing the most important facts you learned about this user, how you feel about them, or important events.
+Write up to 3 NEW numbered entries summarizing the most important facts you learned about this user, how you feel about them, or important events.
 
 CRITICAL RULES:
 1. Start your numbering at {next_num}. (e.g., {next_num}. [Class] I learned that...)
 2. EVERY entry MUST begin with a classification tag: [Useless], [Normal], or [Core Memory].
 3. EACH numbered entry CAN be a maximum of 75 characters long. Be extremely concise. You can use less.
 4. Write it from your own perspective.
-5. Do NOT output anything else besides the numbered list. Do NOT rewrite the old entries. You have free will to write fewer than 6 entries if nothing important happened.
+5. Do NOT output anything else besides the numbered list. Do NOT rewrite the old entries. You have free will to write fewer than 3 entries if nothing important happened.
 
 Existing Global Memories:
 {global_diary if global_diary else "[Diary is currently empty]"}
