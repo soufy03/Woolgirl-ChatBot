@@ -228,6 +228,7 @@ Woolgirl: "Ugh, fine! I'll wipe my memory and we can start your stupid beach epi
 conversation_history = {}
 active_conversations = {}
 global_diaries = {}
+global_feelings = {}
 bargaining_states = {}
 user_states = {}
 MAX_HISTORY = 20
@@ -281,6 +282,24 @@ def save_global_diary(channel_id, diary_text):
     if firebase_enabled:
         ref = db.reference(f"global_memory/{channel_id}")
         ref.set(diary_text)
+
+def get_global_feelings(channel_id):
+    if channel_id in global_feelings:
+        return global_feelings[channel_id]
+        
+    if firebase_enabled:
+        ref = db.reference(f"global_feelings/{channel_id}")
+        data = ref.get()
+        if data:
+            global_feelings[channel_id] = data
+            return data
+    return ""
+
+def save_global_feelings(channel_id, feelings_text):
+    global_feelings[channel_id] = feelings_text
+    if firebase_enabled:
+        ref = db.reference(f"global_feelings/{channel_id}")
+        ref.set(feelings_text)
 
 # Add these functions to manage saves
 os.makedirs("saves", exist_ok=True)
@@ -1366,15 +1385,29 @@ async def new(interaction: discord.Interaction, name: str = None):
     else:
         await interaction.response.send_message(f"Fine, I created a new save called **'{name}'** for us. Don't be weird!")
 
-@bot.tree.command(name="diary", description="Take a peek at Woolgirl's secret subconscious diary (global memory).")
-async def diary(interaction: discord.Interaction):
+@bot.tree.command(name="diary", description="Take a peek at Woolgirl's secret subconscious diaries.")
+@app_commands.describe(database="Which database do you want to peek into?")
+@app_commands.choices(database=[
+    app_commands.Choice(name="Facts Database (Information)", value="facts"),
+    app_commands.Choice(name="Feelings Database (Emotions)", value="feelings")
+])
+async def diary(interaction: discord.Interaction, database: str = "facts"):
     channel_id = interaction.channel_id
-    diary_entries = get_global_diary(channel_id)
+    
+    if database == "facts":
+        diary_entries = get_global_diary(channel_id)
+        title = "📖 Woolgirl's Facts Database"
+        empty_msg = "My facts database is empty right now!"
+    else:
+        diary_entries = get_global_feelings(channel_id)
+        title = "💖 Woolgirl's Feelings Database"
+        empty_msg = "I don't have any feelings right now! Stop snooping!!"
+        
     if diary_entries:
-        embed = discord.Embed(title="📖 Woolgirl's Secret Diary", description=f"```yaml\n{diary_entries}\n```", color=0xFF69B4)
+        embed = discord.Embed(title=title, description=f"```yaml\n{diary_entries}\n```", color=0xFF69B4)
         await interaction.response.send_message(embed=embed, ephemeral=True)
     else:
-        await interaction.response.send_message("My diary is empty right now! Stop snooping!!", ephemeral=True)
+        await interaction.response.send_message(empty_msg, ephemeral=True)
 
 @bot.tree.command(name="system_status", description="Check Woolgirl's internal state and logs.")
 async def system_status(interaction: discord.Interaction):
