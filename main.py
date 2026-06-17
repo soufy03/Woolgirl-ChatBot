@@ -1017,7 +1017,7 @@ async def handle_system_command(command, args, channel, channel_id):
         import urllib.parse
         
         if "self" in img_type:
-            base_design = "anime girl, 150cm tall, fluffy cream-colored wool woven into hair, golden curled ram horns, steel-blue star hair accessory"
+            base_design = "chibi anime style, vibrant digital art, highly detailed, 150cm tall, fluffy cream-colored wool woven into hair, golden curled ram horns, steel-blue star hair accessory, wearing a white fluffy jacket over a blue frilly dress"
             combined_prompt = f"{prompt}, {base_design}"
             encoded_prompt = urllib.parse.quote(combined_prompt)
             
