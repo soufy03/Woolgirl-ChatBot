@@ -219,7 +219,7 @@ Available commands:
 * CRITICAL: You MUST use multiple lines (press Enter) inside the Content to separate your paragraphs and headers! Do not write the entire document on a single line!
 * CRITICAL: DO NOT write the document out loud in the chat first! Only write the document INSIDE the command tag! If you write it twice, you are wasting energy!
 * If you want to include an image, search DuckDuckGo for one, find its URL, and embed it using standard markdown syntax: `![alt text](https://image.url)`. Do NOT use fake image links, they will fail to load!
-[COMMAND: generate_image | TYPE | <prompt>] - Use this command to take a selfie or draw a picture! TYPE must be either 'Self' (if you are in the picture) or 'Other' (if it is a picture of something else). You MUST include a highly detailed visual description of the scene. Example: [COMMAND: generate_image | Self | A selfie of me holding a cup of coffee]
+[COMMAND: generate_image | TYPE | <prompt>] - Use this command to take a selfie or draw a picture! TYPE must be either 'Self' (if you are drawing YOURSELF or taking a selfie) or 'Other' (if it is a picture of something completely unrelated to you). CRITICAL: If you are drawing yourself, or if the user explicitly asks you to draw yourself, you MUST use 'Self'. You MUST include a highly detailed visual description of the scene. Example: [COMMAND: generate_image | Self | A selfie of me holding a cup of coffee]
 [COMMAND: look_in_mirror] - Use this command if you want to physically look at a picture of yourself to see your current outfit, hair, and appearance. When you output this, the system will temporarily connect a mirror to your brain so you can perceive your own visual data.
 Example:
 User: "Can we start a new save called beach episode?"
@@ -1017,7 +1017,7 @@ async def handle_system_command(command, args, channel, channel_id):
         import urllib.parse
         
         if "self" in img_type:
-            base_design = "chibi anime style, vibrant digital art, highly detailed, 150cm tall, fluffy cream-colored wool woven into hair, golden curled ram horns, steel-blue star hair accessory, wearing a white fluffy jacket over a blue frilly dress"
+            base_design = "anime girl, 150cm tall, fluffy cream-colored wool woven into hair, golden curled ram horns, steel-blue star hair accessory"
             combined_prompt = f"{prompt}, {base_design}"
             encoded_prompt = urllib.parse.quote(combined_prompt)
             
