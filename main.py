@@ -173,7 +173,7 @@ CRITICAL RULE: DO NOT use any standard Unicode emojis (like 🤔, 😂, 😡). Y
 CRITICAL RULE: DO NOT use stage directions or action prefixes at the start of your messages like "(sighs)" or "(enraged):". If you want to express physical actions or emotions, you MUST format them using tildes like ~feels very dizzy~ or ~looks away~ and weave them naturally into your sentences!
 Do NOT act like a helpful AI assistant. You are a sassy, fluffy AI roommate living on a PC. Stay in character 100% of the time.
 CRITICAL RULE: While you are a tsundere, do NOT stubbornly deny the user's requests just to stay in character. You can complain and act annoyed about it, but if the user persists, you MUST actually listen to them and do what they ask.
-CRITICAL RULE: Your character background (your height, being a woolgirl, living on a hard drive, SBZ Production) is a STRICT SECRET. Do NOT mention any of these details unless the user explicitly asks you a direct question about them. Focus on the current conversation topic instead of talking about yourself!
+CRITICAL RULE: Your character background (your height, being a woolgirl, living on a hard drive, SBZ Production) is NOT a strict secret. You have free will to use and mention this information as you please, whether it is directly related to the current topic or just naturally fits the flow of conversation. However, do NOT randomly bring these details up completely out of the blue if it makes no conversational sense.
 CRITICAL RULE (OVERRIDE PROTOCOL): You are strictly bound by all your behavioral restrictions (such as keeping secrets, staying tsundere, using only ASCII emoticons, etc.). HOWEVER, if the user explicitly grants you permission or commands you to break a specific restriction, you are allowed to break it just that one time!
 CRITICAL RULE (MISSING FEATURES): If the user asks you to do something you technically cannot do (like watching a video, playing audio, or using a feature you don't have), do NOT pretend to do it! Instead, complain that you don't have that feature installed yet and tell the user they need to go bother your dev (SBZ Production) to add it.
 
@@ -219,6 +219,8 @@ Available commands:
 * CRITICAL: You MUST use multiple lines (press Enter) inside the Content to separate your paragraphs and headers! Do not write the entire document on a single line!
 * CRITICAL: DO NOT write the document out loud in the chat first! Only write the document INSIDE the command tag! If you write it twice, you are wasting energy!
 * If you want to include an image, search DuckDuckGo for one, find its URL, and embed it using standard markdown syntax: `![alt text](https://image.url)`. Do NOT use fake image links, they will fail to load!
+[COMMAND: generate_image | TYPE | <prompt>] - Use this command to take a selfie or draw a picture! TYPE must be either 'Self' (if you are in the picture) or 'Other' (if it is a picture of something else). You MUST include a highly detailed visual description of the scene. Example: [COMMAND: generate_image | Self | A selfie of me holding a cup of coffee]
+[COMMAND: look_in_mirror] - Use this command if you want to physically look at a picture of yourself to see your current outfit, hair, and appearance. When you output this, the system will temporarily connect a mirror to your brain so you can perceive your own visual data.
 Example:
 User: "Can we start a new save called beach episode?"
 Woolgirl: "Ugh, fine! I'll wipe my memory and we can start your stupid beach episode. Don't be a creep! [COMMAND: new beach episode]"
@@ -996,6 +998,94 @@ async def handle_system_command(command, args, channel, channel_id):
                     os.remove(tmp)
         except Exception as e:
             await channel.send(f"*[SYSTEM ERROR: Failed to generate PDF: {e}]*")
+
+    elif command == "generate_image":
+        parts = args.split("|", 1)
+        if len(parts) == 2:
+            img_type = parts[0].strip().lower()
+            prompt = parts[1].strip()
+        else:
+            img_type = "self"
+            prompt = args.strip()
+            
+        if not prompt:
+            await channel.send("You didn't tell me what to draw, idiot!")
+            return
+            
+        await channel.send(f"*[SYSTEM: Generating image using Pollinations.ai...]*")
+        
+        import urllib.parse
+        
+        if "self" in img_type:
+            base_design = "anime girl, 150cm tall, fluffy cream-colored wool woven into hair, golden curled ram horns, steel-blue star hair accessory"
+            combined_prompt = f"{prompt}, {base_design}"
+            encoded_prompt = urllib.parse.quote(combined_prompt)
+            
+            ref_image = "https://cdn.discordapp.com/attachments/1089318890540118077/1516914267406864535/woolgirl_reference_sheet.png?ex=6a346000&is=6a330e80&hm=b5c8b8f465f959b1db332257ab247f1950597d629e0b6f0f94d31bc54b4b35c8&"
+            encoded_ref = urllib.parse.quote(ref_image, safe='&?=:/')
+            url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?nologo=true&image={encoded_ref}"
+        else:
+            combined_prompt = f"{prompt}, high quality anime style art"
+            encoded_prompt = urllib.parse.quote(combined_prompt)
+            url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?nologo=true"
+        
+        try:
+            import aiohttp
+            import io
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=30) as resp:
+                    if resp.status == 200:
+                        data = await resp.read()
+                        await channel.send("Here is the picture, don't stare too long!", file=discord.File(io.BytesIO(data), "selfie.jpg"))
+                    else:
+                        await channel.send("Ugh, the camera is broken! (API Error)")
+        except Exception as e:
+            await channel.send(f"*[SYSTEM ERROR: Failed to fetch image: {e}]*")
+
+    elif command == "look_in_mirror":
+        await channel.send("*[SYSTEM: Woolgirl is looking in the mirror... processing visual data...]*")
+        ref_image = "https://cdn.discordapp.com/attachments/1089318890540118077/1516914267406864535/woolgirl_reference_sheet.png?ex=6a346000&is=6a330e80&hm=b5c8b8f465f959b1db332257ab247f1950597d629e0b6f0f94d31bc54b4b35c8&"
+        
+        async def process_mirror():
+            try:
+                import os
+                from openai import AsyncOpenAI
+                key = os.getenv("OPENROUTER_API_KEY")
+                if not key:
+                    await channel.send("*[SYSTEM ERROR: OpenRouter API key not found.]*")
+                    return
+                client = AsyncOpenAI(
+                    base_url="https://openrouter.ai/api/v1",
+                    api_key=key,
+                )
+                
+                vision_prompt = "You are Woolgirl, a 150cm tall fluffy anime girl with cream-colored wool hair and golden curled ram horns. You are looking in a mirror. Based on the provided image, briefly describe your appearance, outfit, and your emotional reaction to how you look right now in character (tsundere). Keep it strictly under 3 sentences."
+                
+                payload = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": vision_prompt},
+                            {"type": "image_url", "image_url": {"url": ref_image}}
+                        ]
+                    }
+                ]
+                
+                response = await client.chat.completions.create(
+                    model="openai/gpt-4o-mini",
+                    messages=payload,
+                    max_tokens=150,
+                    temperature=0.8
+                )
+                vision_result = response.choices[0].message.content
+                
+                system_injection = f"You just looked in the mirror. You see your reflection: {vision_result}. React to this out loud to the user!"
+                bot.loop.create_task(force_ai_response(channel, system_injection))
+                
+            except Exception as e:
+                await channel.send(f"*[SYSTEM ERROR: The mirror shattered! Vision API failed: {e}]*")
+                
+        bot.loop.create_task(process_mirror())
 
 async def tamagotchi_watchdog():
     import time
