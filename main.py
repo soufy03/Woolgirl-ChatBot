@@ -362,20 +362,33 @@ async def compress_memory(channel_id):
             
     next_num = highest_num + 1
         
-    prompt = f"""You are Woolgirl's inner subconscious. Review this recent conversation and append to your diary.
-You may write up to 3 NEW numbered entries summarizing only highly significant facts or major emotional shifts. If you have fewer than 3 Normal or Core memories, you are allowed to fill the remaining spots with useless trivia you learned.
+    global_feelings = get_global_feelings(channel_id)
+    
+    prompt = f"""You are Woolgirl's inner subconscious. Review this recent conversation and extract memories.
+You must output TWO distinct sections: [FACTS] and [FEELINGS].
+
+[FACTS]
+Here, write up to 3 NEW numbered entries summarizing only highly significant facts or information gathered about the USER.
+1. Start your numbering at {next_num}. (e.g., {next_num}. [Normal] The user likes...)
+2. EVERY entry MUST begin with a classification tag: [Useless (1)], [Normal], or [Core Memory]. ALL useless memories MUST be tagged as [Useless (1)].
+3. DO NOT log feelings, emotional states, or personality traits here. ONLY concrete facts, events, and preferences about the user.
+4. Do NOT use "I" or "me" in this section UNLESS you are logging a fact your Dev specifically told you about yourself. Otherwise, use "The user...".
+
+[FEELINGS]
+Here, write a MAXIMUM of 1 NEW bullet point summarizing your current emotional shift, tsundere opinion, or internal feeling.
+1. DO NOT repeat your base personality traits (e.g., "I pretended to be annoyed"). ONLY log specific emotional reactions tied to distinct events in this conversation!
+2. Use a bullet point (-), not a number.
+3. Be extremely concise.
 
 CRITICAL RULES:
-1. Start your numbering at {next_num}. (e.g., {next_num}. [Normal] I learned that...)
-2. EVERY entry MUST begin with a classification tag: [Useless (1)], [Normal], or [Core Memory]. Note: ALL useless memories MUST be tagged as [Useless (1)] so I know they have 1 cycle left to live.
-3. EACH numbered entry CAN be a maximum of 75 characters long. Be extremely concise.
-4. STRICT FIRST-PERSON ONLY: Use "I", "me", and "my". NEVER refer to yourself as "Woolgirl" or "She"! You are Woolgirl.
-5. BE EXTREMELY CRITICAL: If nothing highly significant or new occurred (just casual chatting or playing a game), do NOT force an entry! You have complete free will to output 0 entries. Use [Useless (1)] only for trivial details if you want to remember them temporarily.
-6. SYSTEM MESSAGES: Any [SYSTEM NOTIFICATION] in the chat (like "You just fell asleep" or "energy restored") is directed at YOU, not the user! Do not record system mechanics as facts about the user.
-7. Do NOT output anything else besides the numbered list. Do NOT rewrite old entries.
+- If nothing highly significant occurred, you have free will to output 0 entries in either section.
+- Any [SYSTEM NOTIFICATION] in the chat is directed at YOU, not the user! Do not record system mechanics as facts.
 
-Existing Global Memories:
+Existing Global Information Diary (FACTS):
 {global_diary if global_diary else "[Diary is currently empty]"}
+
+Existing Feelings Diary:
+{global_feelings if global_feelings else "[Feelings Diary is empty]"}
 
 New Conversation to summarize:
 {json.dumps(messages_to_compress)}"""
@@ -388,15 +401,28 @@ New Conversation to summarize:
         )
         new_entries = response.choices[0].message.content.strip()
         
-        # Append new entries
-        updated_diary = f"{global_diary}\n{new_entries}".strip() if global_diary else new_entries
-        save_global_diary(channel_id, updated_diary)
+        # Parse FACTS and FEELINGS
+        import re
+        facts_match = re.search(r'\[FACTS\](.*?)(\[FEELINGS\]|$)', new_entries, re.IGNORECASE | re.DOTALL)
+        feelings_match = re.search(r'\[FEELINGS\](.*)', new_entries, re.IGNORECASE | re.DOTALL)
+        
+        new_facts = facts_match.group(1).strip() if facts_match else ""
+        new_feelings = feelings_match.group(1).strip() if feelings_match else ""
+        
+        if new_facts and new_facts.lower() != "none" and "0 entries" not in new_facts.lower():
+            updated_diary = f"{global_diary}\n{new_facts}".strip() if global_diary else new_facts
+            save_global_diary(channel_id, updated_diary)
+            print(f"Appended to facts for {channel_id}: {new_facts}")
+            
+        if new_feelings and new_feelings.lower() != "none" and "0 entries" not in new_feelings.lower():
+            updated_feelings = f"{global_feelings}\n{new_feelings}".strip() if global_feelings else new_feelings
+            save_global_feelings(channel_id, updated_feelings)
+            print(f"Appended to feelings for {channel_id}: {new_feelings}")
         
         # Truncate short-term history
         conversation_history[channel_id] = [{"role": "system", "content": SYSTEM_PROMPT}] + recent_messages
         name = active_conversations.get(channel_id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
         save_conversation(channel_id, name)
-        print(f"Appended to global diary for {channel_id}: {new_entries}")
         
         if firebase_enabled:
             cycle_ref = db.reference(f"global_memory_cycles/{channel_id}")
@@ -415,35 +441,40 @@ New Conversation to summarize:
 
 async def reevaluate_memory(channel_id):
     global_diary = get_global_diary(channel_id)
-    if not global_diary:
+    global_feelings = get_global_feelings(channel_id)
+    
+    if not global_diary and not global_feelings:
         return
         
-    prompt = f"""You are Woolgirl. It is time to autonomously audit your entire Global Diary.
-Here is how your memory classification works:
-- [Useless (1)] / [Useless (0)] = Temporary trivia
-- [Normal] = Standard importance
-- [Core Memory] = High importance
+    prompt = f"""You are Woolgirl. It is time to autonomously audit your memory databases.
+You have TWO separate databases: [FACTS] and [FEELINGS].
+You must output both sections in your response, followed by a [CHANGELOG] at the very end.
 
-Based entirely on your own free will, personality, and current feelings:
-1. Use the current memory class as a baseline, but do not let it restrict you. You can upgrade or downgrade any memory.
-2. If your opinion on a memory has changed based on recent events, you have the free will to OVERWRITE and rewrite the text of that specific memory to reflect your new stance.
-3. DEGRADATION CYCLE (CRITICAL):
-   - If you see a [Useless (1)] memory, you have 4 options:
-      A) Delete it completely right now.
-      B) Degrade it to [Useless (0)] (this means it will definitely be deleted on the next cycle).
-      C) Leave it as [Useless (1)] if you are extremely conflicted and want to pause its timer for one more cycle.
-      D) Upgrade it to [Normal] (removing the number).
-   - If you see a [Useless (0)] memory, you MUST permanently delete it by completely omitting it from your output!
-4. CONSOLIDATION: If you see multiple memories that contain duplicate information or refer to the exact same event, you MUST combine them into a single, comprehensive memory entry, and permanently delete the redundant ones to save space!
-5. Keep the exact same numbering for the entries you keep. Do NOT renumber them!
+[FACTS]
+This section uses a Degradation Cycle: [Useless (1)] -> [Useless (0)] -> Deleted.
+1. Use the current memory class as a baseline. You can upgrade or downgrade any memory.
+2. If you see a [Useless (1)] memory: you can delete it, degrade it to [Useless (0)], leave it as (1), or upgrade it to [Normal].
+3. If you see a [Useless (0)] memory: you MUST permanently delete it by omitting it!
+4. CONSOLIDATION: Combine duplicate facts and permanently delete redundant ones.
+5. STRICT POV FIX: If a fact is written in the 3rd person ("Woolgirl did X"), rewrite it to be about the user ("The user did X") unless it is a physical fact your Dev told you about yourself. Do NOT use "I" or "me" in this section.
+6. THE MIGRATION: If you see an entry in this section that is purely an emotional state or a personality trait (e.g., "I pretended to be annoyed"), you MUST delete it from the [FACTS] section and move it to the [FEELINGS] section!
 
-CRITICAL RULES:
-- Output the revised numbered list first.
-- Keep the `[Class]` tags strictly formatted exactly as written.
-- AT THE VERY END, you MUST output a [CHANGELOG] detailing exactly what you changed (e.g., "Deleted Entry 4 (Useless 0)", "Upgraded Entry 2 to Normal", "Degraded Entry 5 to Useless (0)").
+[FEELINGS]
+1. Review your current emotional states. Delete any feelings you no longer hold, UPDATE/CHANGE any feelings that have evolved based on recent events, and delete any entries that simply repeat your base personality (e.g. "I am competitive").
+2. Only keep specific emotional reactions tied to distinct events.
+3. Use bullet points (-).
 
-Your Current Global Diary:
-{global_diary}"""
+CRITICAL FORMATTING RULES:
+- NEVER write `// Deleted` or ANY code comments in the diary! If an entry is deleted, completely erase the line from existence.
+- Keep the exact same numbering for the [FACTS] you keep. Do NOT renumber them!
+
+Your Current Global Information Diary (FACTS):
+{global_diary if global_diary else "[Diary is currently empty]"}
+
+Your Current Feelings Diary:
+{global_feelings if global_feelings else "[Feelings Diary is empty]"}
+
+AT THE VERY END, you MUST output a [CHANGELOG] detailing exactly what you changed."""
 
     try:
         response = await openrouter_client.chat.completions.create(
@@ -455,7 +486,13 @@ Your Current Global Diary:
         
         import re
         parts = re.split(r'\[CHANGELOG\]', audited_text, flags=re.IGNORECASE)
-        audited_diary = parts[0].strip()
+        audited_diaries = parts[0].strip()
+        
+        facts_match = re.search(r'\[FACTS\](.*?)(\[FEELINGS\]|$)', audited_diaries, re.IGNORECASE | re.DOTALL)
+        feelings_match = re.search(r'\[FEELINGS\](.*)', audited_diaries, re.IGNORECASE | re.DOTALL)
+        
+        new_facts = facts_match.group(1).strip() if facts_match else ""
+        new_feelings = feelings_match.group(1).strip() if feelings_match else ""
         
         changelog = "No changes made."
         if len(parts) > 1:
@@ -466,8 +503,12 @@ Your Current Global Diary:
             logf.write(f"\n--- REEVALUATION CYCLE FOR {channel_id} AT {datetime.datetime.now()} ---\n")
             logf.write(changelog + "\n")
             
-        save_global_diary(channel_id, audited_diary)
-        print(f"Autonomously audited global diary for {channel_id}.")
+        if new_facts:
+            save_global_diary(channel_id, new_facts)
+        if new_feelings:
+            save_global_feelings(channel_id, new_feelings)
+            
+        print(f"Autonomously audited memory databases for {channel_id}.")
     except Exception as e:
         print(f"Failed to audit memory: {e}")
 
@@ -520,10 +561,15 @@ async def force_ai_response(channel, system_prompt_addition, bypass_sleep=False)
                 time_injection = f"\n\n[CURRENT REAL-WORLD TIME: {current_time} | DATE: {current_date}]"
             
             diary = get_global_diary(channel.id)
+            feelings = get_global_feelings(channel.id)
+            
+            sys_content = f"{SYSTEM_PROMPT}{time_injection}"
             if diary:
-                payload_history[0] = {"role": "system", "content": f"{SYSTEM_PROMPT}{time_injection}\n\n[GLOBAL SUBCONSCIOUS DIARY]\n{diary}"}
-            else:
-                payload_history[0] = {"role": "system", "content": f"{SYSTEM_PROMPT}{time_injection}"}
+                sys_content += f"\n\n[GLOBAL INFORMATION DIARY (FACTS ONLY)]\n{diary}"
+            if feelings:
+                sys_content += f"\n\n[FEELINGS DIARY (EMOTIONS & OPINIONS)]\n{feelings}"
+                
+            payload_history[0] = {"role": "system", "content": sys_content}
                 
             if active_api_provider == "groq":
                 payload_history = sanitize_history_for_groq(payload_history)
@@ -1125,10 +1171,15 @@ async def on_message(message):
                 time_injection = f"\n\n[CURRENT REAL-WORLD TIME: {current_time} | DATE: {current_date}]{state_injection}"
                 
                 diary = get_global_diary(channel_id)
+                feelings = get_global_feelings(channel_id)
+                
+                sys_content = f"{SYSTEM_PROMPT}{time_injection}"
                 if diary:
-                    payload_history[0] = {"role": "system", "content": f"{SYSTEM_PROMPT}{time_injection}\n\n[GLOBAL SUBCONSCIOUS DIARY]\n{diary}"}
-                else:
-                    payload_history[0] = {"role": "system", "content": f"{SYSTEM_PROMPT}{time_injection}"}
+                    sys_content += f"\n\n[GLOBAL INFORMATION DIARY (FACTS ONLY)]\n{diary}"
+                if feelings:
+                    sys_content += f"\n\n[FEELINGS DIARY (EMOTIONS & OPINIONS)]\n{feelings}"
+                    
+                payload_history[0] = {"role": "system", "content": sys_content}
                     
                 if active_api_provider == "groq":
                     payload_history = sanitize_history_for_groq(payload_history)
