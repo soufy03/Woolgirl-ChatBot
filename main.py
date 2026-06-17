@@ -387,17 +387,18 @@ async def compress_memory(channel_id):
 You must output TWO distinct sections: [FACTS] and [FEELINGS].
 
 [FACTS]
-Here, write up to 3 NEW numbered entries summarizing only highly significant facts or information gathered about the USER.
+Here, write up to 3 NEW numbered entries summarizing only highly significant facts or information gathered about the HUMAN (Sufyan).
 1. Start your numbering at {next_num}. (e.g., {next_num}. [Normal] The user likes...)
 2. EVERY entry MUST begin with a classification tag: [Useless (1)], [Normal], or [Core Memory]. ALL useless memories MUST be tagged as [Useless (1)].
-3. DO NOT log feelings, emotional states, or personality traits here. ONLY concrete facts, events, and preferences about the user.
-4. Do NOT use "I" or "me" in this section UNLESS you are logging a fact your Dev specifically told you about yourself. Otherwise, use "The user...".
+3. DO NOT log feelings, emotional states, or personality traits here. ONLY concrete facts, events, and preferences about the human.
+4. "The user" means the HUMAN. Do NOT refer to yourself as "The user". Write facts about the human (e.g. "The user likes X"). Do NOT use "I" or "me" unless logging a physical fact the Dev told you about your code.
 
 [FEELINGS]
 Here, write a MAXIMUM of 1 NEW bullet point summarizing your current emotional shift, tsundere opinion, or internal feeling.
 1. DO NOT repeat your base personality traits (e.g., "I pretended to be annoyed"). ONLY log specific emotional reactions tied to distinct events in this conversation!
 2. Use a bullet point (-), not a number.
-3. Be extremely concise.
+3. STRICT FIRST-PERSON POV: You MUST use "I", "me", and "my" when describing your feelings (e.g., "I feel a strong connection..."). Do NOT use "The user feels..." to describe your own feelings!
+4. Be extremely concise.
 
 CRITICAL RULES:
 - If nothing highly significant occurred, you have free will to output 0 entries in either section.
@@ -475,13 +476,14 @@ This section uses a Degradation Cycle: [Useless (1)] -> [Useless (0)] -> Deleted
 2. If you see a [Useless (1)] memory: you can delete it, degrade it to [Useless (0)], leave it as (1), or upgrade it to [Normal].
 3. If you see a [Useless (0)] memory: you MUST permanently delete it by omitting it!
 4. CONSOLIDATION: Combine duplicate facts and permanently delete redundant ones.
-5. STRICT POV FIX: If a fact is written in the 3rd person ("Woolgirl did X"), rewrite it to be about the user ("The user did X") unless it is a physical fact your Dev told you about yourself. Do NOT use "I" or "me" in this section.
-6. THE MIGRATION: If you see an entry in this section that is purely an emotional state or a personality trait (e.g., "I pretended to be annoyed"), you MUST delete it from the [FACTS] section and move it to the [FEELINGS] section!
+5. STRICT POV FIX: "The user" refers to the HUMAN (Sufyan). You must NOT refer to yourself as "The user"! If a memory says "The user learned their creator...", it is WRONG because YOU learned that, not the human. Rewrite these memories so the human is the subject (e.g., "Sufyan is my creator"). Do NOT use "I" or "me" in this section.
+6. THE MIGRATION: If you see an entry in this section that is purely an emotional state or a personality trait (e.g., "The user feels flattered..."), you MUST delete it from the [FACTS] section and move it to the [FEELINGS] section!
 
 [FEELINGS]
 1. Review your current emotional states. Delete any feelings you no longer hold, UPDATE/CHANGE any feelings that have evolved based on recent events, and delete any entries that simply repeat your base personality (e.g. "I am competitive").
 2. Only keep specific emotional reactions tied to distinct events.
-3. Use bullet points (-).
+3. STRICT FIRST-PERSON POV: If you migrate feelings from the FACTS database, you MUST rewrite them using "I", "me", and "my" (e.g., "I feel a strong connection..."). Do NOT use "The user feels..." to describe your own feelings!
+4. Use bullet points (-).
 
 CRITICAL FORMATTING RULES:
 - NEVER write `// Deleted` or ANY code comments in the diary! If an entry is deleted, completely erase the line from existence.
