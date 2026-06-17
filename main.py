@@ -1031,7 +1031,7 @@ async def tamagotchi_watchdog():
             
             if c_state == "Tired":
                 if now - last_msg > 600:
-                    prompt = "You have been exhausted and tired for 10 minutes. The user hasn't messaged you. You are now falling asleep. Output [COMMAND: set_sleep_timer <hours>] to decide exactly how many hours you want to sleep (average is 6, but it's up to your free will). Do NOT output anything else."
+                    prompt = "You have been exhausted and tired for 10 minutes. The user hasn't messaged you. You are now falling asleep. Output [COMMAND: set_sleep_timer <hours>] to decide exactly how many hours you want to sleep (The golden number is 6, and your absolute MAXIMUM limit is 8 hours). Do NOT output anything else."
                     bot.loop.create_task(force_ai_response(channel, prompt, bypass_sleep=True))
                     state_data["last_message_time"] = now
                     save_user_states()
@@ -1416,9 +1416,20 @@ async def system_status(interaction: discord.Interaction):
     channel_id = interaction.channel_id
     energy = 100
     state = "Awake"
+    sleep_info = ""
     if channel_id in user_states:
         energy = user_states[channel_id].get("energy", 100)
         state = user_states[channel_id].get("state", "Awake")
+        if state == "Asleep":
+            import time
+            sleep_until = user_states[channel_id].get("sleep_until", 0)
+            remaining = max(0, sleep_until - time.time())
+            if remaining > 0:
+                hours = int(remaining // 3600)
+                minutes = int((remaining % 3600) // 60)
+                sleep_info = f"\n**Waking up in:** {hours}h {minutes}m"
+            else:
+                sleep_info = "\n**Waking up in:** Any minute now..."
         
     logs = "No audit logs found yet."
     try:
@@ -1432,7 +1443,7 @@ async def system_status(interaction: discord.Interaction):
         pass
         
     embed = discord.Embed(title="⚙️ System Status", color=0x00FF00)
-    embed.add_field(name="Current State", value=state, inline=True)
+    embed.add_field(name="Current State", value=f"{state}{sleep_info}", inline=True)
     embed.add_field(name="Energy Level", value=f"{energy}%", inline=True)
     embed.add_field(name="Last Reevaluation Logs", value=f"```\n{logs.strip() if logs.strip() else 'No recent logs.'}\n```", inline=False)
     
