@@ -444,18 +444,7 @@ New Conversation to summarize:
         name = active_conversations.get(channel_id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
         save_conversation(channel_id, name)
         
-        if firebase_enabled:
-            cycle_ref = db.reference(f"global_memory_cycles/{channel_id}")
-            cycles = cycle_ref.get() or 0
-            cycles += 1
-            cycle_ref.set(cycles)
-            if cycles >= 3:
-                bot.loop.create_task(reevaluate_memory(channel_id))
-                cycle_ref.set(0)
-                if channel_id in user_states:
-                    import time
-                    user_states[channel_id]["last_audit_time"] = time.time()
-                    save_user_states()
+        # Cycle-based audit trigger has been removed in favor of a pure 5-hour background timer.
     except Exception as e:
         print(f"Failed to compress memory: {e}")
 
@@ -1024,11 +1013,11 @@ async def tamagotchi_watchdog():
             last_msg = state_data.get("last_message_time", now)
             last_audit = state_data.get("last_audit_time", now)
             
-            if now - last_audit > 3600:
+            # Pure 5-hour background audit timer
+            if now - last_audit > 18000:
                 bot.loop.create_task(reevaluate_memory(channel_id))
                 state_data["last_audit_time"] = now
-                save_user_states()
-            
+                save_user_states()            
             if c_state == "Tired":
                 if now - last_msg > 600:
                     prompt = "You have been exhausted and tired for 10 minutes. The user hasn't messaged you. You are now falling asleep. Output [COMMAND: set_sleep_timer <hours>] to decide exactly how many hours you want to sleep (The golden number is 6, and your absolute MAXIMUM limit is 8 hours). Do NOT output anything else."
