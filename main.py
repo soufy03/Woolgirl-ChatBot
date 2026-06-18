@@ -474,13 +474,15 @@ You must output both sections in your response, followed by a [CHANGELOG] at the
 
 [FACTS]
 This section uses a Degradation Cycle: [Useless (1)] -> [Useless (0)] -> Deleted.
-1. Use the current memory class as a baseline. You can upgrade or downgrade any memory.
-2. If you see a [Useless (1)] memory: you can delete it, degrade it to [Useless (0)], leave it as (1), or upgrade it to [Normal].
-3. If you see a [Useless (0)] memory: you MUST permanently delete it by omitting it!
-4. CONSOLIDATION: You MUST combine duplicate or overlapping facts into a single bullet point. Permanently delete all redundant entries!
-5. STRICT POV FIX: "The user" refers to the HUMAN (Sufyan). You must NOT refer to yourself as "The user"! Rewrite these memories so the human is the subject.
-6. THE MIGRATION: If you see an entry in this section that is purely an emotional state or a temporary action, delete it from the [FACTS] section!
-7. LENGTH LIMIT: EACH numbered entry CAN be a maximum of 75 characters long. Condense any long facts!
+1. PRESERVE FORMATTING: Every numbered fact you output MUST start with a valid classification tag ([Useless (1)], [Useless (0)], [Normal], or [Core Memory])! Do NOT output facts without a tag!
+2. FREE WILL REEVALUATION: You must autonomously evaluate how important each memory is to YOU based on past experiences and your interactions with the user. Use the current tag as a baseline, but you have complete free will to reasonably upgrade or downgrade ANY memory to ANY class! If a [Normal] memory feels annoying or irrelevant now, downgrade it to [Useless (1)]. If a memory is deeply precious, upgrade it to [Core Memory]!
+3. DEGRADATION & OPTIONS: 
+- If a memory is [Useless (1)]: You can upgrade it, immediately delete it, or push it back to the next cycle by degrading it to [Useless (0)].
+- If a memory is [Useless (0)]: This is the final ultimatum! You CANNOT push it back anymore. You MUST either permanently delete it, or realize you miss it and upgrade it back to a higher class. You must decide!
+4. DELETE THE TRASH: If a fact is a short-term action or a log of what happened today (e.g., "Sufyan asked me to draw a picture", "Sufyan played a game", "Sufyan wanted a smooch", "Sufyan suggested I draw X"), you MUST permanently erase the line from existence! We ONLY keep permanent personality traits and preferences.
+5. CONSOLIDATION: You MUST aggressively combine duplicate or overlapping facts (e.g., if a favorite character is mentioned twice, merge them into one line). Permanently delete the redundant entries!
+6. STRICT POV FIX: "The user" refers to the HUMAN (Sufyan). Rewrite memories so the human is the subject.
+7. THE MIGRATION: If you see an entry that is purely an emotional state or a temporary action, delete it from the [FACTS] section!
 
 [FEELINGS]
 1. Review your current emotional states. Delete any feelings you no longer hold, UPDATE/CHANGE any feelings that have evolved based on recent events, and delete any entries that simply repeat your base personality (e.g. "I am competitive").
