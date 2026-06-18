@@ -1581,12 +1581,22 @@ async def forget(interaction: discord.Interaction, number: int):
     bot.loop.create_task(force_ai_response(interaction.channel, prompt))
 
 @bot.tree.command(name="load", description="Loads a past conversation and prints the chat history.")
-@app_commands.describe(name="The exact name of the conversation you want to load")
-async def load(interaction: discord.Interaction, name: str):
+@app_commands.describe(name="The exact name of the conversation you want to load (Optional)")
+async def load(interaction: discord.Interaction, name: str = None):
     if not isinstance(interaction.channel, discord.DMChannel):
         await interaction.response.send_message("Are you stupid? Save files are only for private DMs! In a server, we just talk normally.", ephemeral=True)
         return
     channel_id = interaction.channel_id
+    
+    if name is None:
+        save_list = get_saved_conversations(channel_id)
+        if not save_list:
+            await interaction.response.send_message("You haven't saved any memories yet, dummy!", ephemeral=True)
+        else:
+            view = LoadSaveView(channel_id, save_list)
+            await interaction.response.send_message("Select a saved memory below to load it:", view=view)
+        return
+        
     await interaction.response.defer()
     
     if load_conversation(channel_id, name):
@@ -1614,6 +1624,51 @@ async def load(interaction: discord.Interaction, name: str):
                 await interaction.followup.send(chunk)
     else:
         await interaction.followup.send(f"Are you blind? There is no save file named **'{name}'**! Type `/all_conversations` to see them.")
+
+class LoadSaveView(discord.ui.View):
+    def __init__(self, channel_id: int, saves: list):
+        super().__init__(timeout=120)
+        self.channel_id = channel_id
+        
+        options = []
+        for save in saves[:25]:
+            options.append(discord.SelectOption(label=save, description=f"Load save: {save}"))
+            
+        if options:
+            self.select = discord.ui.Select(placeholder="Select a conversation to load...", options=options)
+            self.select.callback = self.select_callback
+            self.add_item(self.select)
+            
+    async def select_callback(self, interaction: discord.Interaction):
+        save_name = self.select.values[0]
+        await interaction.response.defer()
+        
+        if load_conversation(self.channel_id, save_name):
+            active_conversations[self.channel_id] = save_name
+            await interaction.followup.send(f"I loaded the memory **'{save_name}'**. Here is what happened... don't make me repeat it again!")
+            
+            history = conversation_history[self.channel_id]
+            transcript = ""
+            
+            for msg in history:
+                role = msg["role"]
+                content = msg["content"]
+                if role == "system":
+                    continue
+                if role == "user":
+                    transcript += f"**{content}**\n"
+                elif role == "assistant":
+                    transcript += f"**Tsundere:** {content}\n\n"
+                    
+            if transcript:
+                chunks = [transcript[i:i+1900] for i in range(0, len(transcript), 1900)]
+                for chunk in chunks:
+                    await interaction.followup.send(chunk)
+            
+            self.select.disabled = True
+            await interaction.message.edit(view=self)
+        else:
+            await interaction.followup.send(f"Failed to load the save file **'{save_name}'**!", ephemeral=True)
 
 class DeleteSaveView(discord.ui.View):
     def __init__(self, channel_id: int, saves: list):
