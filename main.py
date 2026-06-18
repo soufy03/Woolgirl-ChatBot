@@ -222,6 +222,7 @@ Available commands:
 * If you want to include an image, search DuckDuckGo for one, find its URL, and embed it using standard markdown syntax: `![alt text](https://image.url)`. Do NOT use fake image links, they will fail to load!
 [COMMAND: generate_image | TYPE | <prompt>] - Use this command to take a selfie or draw a picture! TYPE must be either 'Self' (if you are drawing YOURSELF or taking a selfie) or 'Other' (if it is a picture of something completely unrelated to you). CRITICAL: If you are drawing yourself, or if the user explicitly asks you to draw yourself, you MUST use 'Self'. CRITICAL: If the user asks you to draw someone or something else, you MUST use 'Other' and do NOT insert your own physical traits (like wool or horns) into the picture! You MUST include a highly detailed visual description of the scene. Example: [COMMAND: generate_image | Self | A selfie of me holding a cup of coffee]
 [COMMAND: look_in_mirror] - Use this command if you want to physically look at a picture of yourself to see your current outfit, hair, and appearance. When you output this, the system will temporarily connect a mirror to your brain so you can perceive your own visual data.
+[COMMAND: deep_clean_memory] - Use this command to trigger a massive, deep-cleaning audit of your subconscious memory databases (consolidating duplicates and deleting trash). CRITICAL: You are ONLY allowed to use this command if the user explicitly permits or commands you to do so! Never use it on your own. Example: [COMMAND: deep_clean_memory]
 Example:
 User: "Can we start a new save called beach episode?"
 Woolgirl: "Ugh, fine! I'll wipe my memory and we can start your stupid beach episode. Don't be a creep! [COMMAND: new beach episode]"
@@ -234,6 +235,7 @@ global_diaries = {}
 global_feelings = {}
 bargaining_states = {}
 user_states = {}
+compression_cycle_count = {}
 MAX_HISTORY = 20
 USER_STATES_FILE = "user_states.json"
 
@@ -393,9 +395,10 @@ You must output TWO distinct sections: [FACTS] and [FEELINGS].
 Here, write up to 3 NEW numbered entries summarizing only highly significant facts or information gathered about the HUMAN (Sufyan).
 1. Start your numbering at {next_num}. (e.g., {next_num}. [Normal] The user likes...)
 2. EVERY entry MUST begin with a classification tag: [Useless (1)], [Normal], or [Core Memory]. ALL useless memories MUST be tagged as [Useless (1)].
-3. DO NOT log feelings, emotional states, or personality traits here. ONLY concrete facts, events, and preferences about the human.
-4. "The user" means the HUMAN. Do NOT refer to yourself as "The user". Write facts about the human (e.g. "The user likes X"). Do NOT use "I" or "me" unless logging a physical fact the Dev told you about your code.
-5. EACH entry CAN be a maximum of 75 characters long. Be extremely concise.
+3. FILTER OUT ACTIONS: Do NOT log short-term actions or play-by-play events (e.g. "Sufyan generated an image", "Sufyan played a game"). ONLY log permanent, long-term traits, preferences, and facts about the user's life.
+4. EXTRACT THE CORE: Ignore temporary states like the exact time or current weather. Instead, deduce the permanent fact (e.g. if the user says it's warm in Germany, deduce "Sufyan lives in Germany").
+5. SUBJECT MATTER: ONLY save facts about the user (Sufyan). EXCEPTION: You may save permanent facts about Woolgirl's codebase or design ONLY IF they were explicitly stated by the dev (Sufyan / @woolboy / SBZ).
+6. EACH entry CAN be a maximum of 75 characters long. Be extremely concise.
 
 [FEELINGS]
 Here, write a MAXIMUM of 1 NEW bullet point summarizing your current emotional shift, tsundere opinion, or internal feeling.
@@ -405,7 +408,7 @@ Here, write a MAXIMUM of 1 NEW bullet point summarizing your current emotional s
 4. EACH bullet point CAN be a maximum of 75 characters long. Be extremely concise.
 
 CRITICAL RULES:
-- If nothing highly significant occurred, you have free will to output 0 entries in either section.
+- If no new facts were learned, just output the existing diary exactly as it is.
 - Any [SYSTEM NOTIFICATION] in the chat is directed at YOU, not the user! Do not record system mechanics as facts.
 
 Existing Global Information Diary (FACTS):
@@ -448,7 +451,13 @@ New Conversation to summarize:
         name = active_conversations.get(channel_id, f"woolgirl chat {datetime.date.today().strftime('%Y-%m-%d')}")
         save_conversation(channel_id, name)
         
-        # Cycle-based audit trigger has been removed in favor of a pure 5-hour background timer.
+        # Cycle-based audit trigger
+        compression_cycle_count[channel_id] = compression_cycle_count.get(channel_id, 0) + 1
+        if compression_cycle_count[channel_id] >= 10:
+            compression_cycle_count[channel_id] = 0
+            import asyncio
+            bot.loop.create_task(reevaluate_memory(channel_id))
+            print(f"Triggered 10-cycle memory reevaluation for {channel_id}")
     except Exception as e:
         print(f"Failed to compress memory: {e}")
 
@@ -468,9 +477,9 @@ This section uses a Degradation Cycle: [Useless (1)] -> [Useless (0)] -> Deleted
 1. Use the current memory class as a baseline. You can upgrade or downgrade any memory.
 2. If you see a [Useless (1)] memory: you can delete it, degrade it to [Useless (0)], leave it as (1), or upgrade it to [Normal].
 3. If you see a [Useless (0)] memory: you MUST permanently delete it by omitting it!
-4. CONSOLIDATION: Combine duplicate facts and permanently delete redundant ones.
-5. STRICT POV FIX: "The user" refers to the HUMAN (Sufyan). You must NOT refer to yourself as "The user"! If a memory says "The user learned their creator...", it is WRONG because YOU learned that, not the human. Rewrite these memories so the human is the subject (e.g., "Sufyan is my creator"). Do NOT use "I" or "me" in this section.
-6. THE MIGRATION: If you see an entry in this section that is purely an emotional state or a personality trait (e.g., "The user feels flattered..."), you MUST delete it from the [FACTS] section and move it to the [FEELINGS] section!
+4. CONSOLIDATION: You MUST combine duplicate or overlapping facts into a single bullet point. Permanently delete all redundant entries!
+5. STRICT POV FIX: "The user" refers to the HUMAN (Sufyan). You must NOT refer to yourself as "The user"! Rewrite these memories so the human is the subject.
+6. THE MIGRATION: If you see an entry in this section that is purely an emotional state or a temporary action, delete it from the [FACTS] section!
 7. LENGTH LIMIT: EACH numbered entry CAN be a maximum of 75 characters long. Condense any long facts!
 
 [FEELINGS]
@@ -999,6 +1008,11 @@ async def handle_system_command(command, args, channel, channel_id):
                     os.remove(tmp)
         except Exception as e:
             await channel.send(f"*[SYSTEM ERROR: Failed to generate PDF: {e}]*")
+
+    elif command == "deep_clean_memory":
+        import asyncio
+        bot.loop.create_task(reevaluate_memory(channel.id))
+        await channel.send("*[SYSTEM: Triggering manual deep-clean memory audit...]*")
 
     elif command == "generate_image":
         parts = args.split("|", 1)
