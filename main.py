@@ -438,6 +438,19 @@ New Conversation to summarize:
         
         if new_facts and new_facts.lower() != "none" and "0 entries" not in new_facts.lower():
             updated_diary = f"{global_diary}\n{new_facts}".strip() if global_diary else new_facts
+            
+            # Re-sequence numbering cleanly
+            import re
+            lines = updated_diary.strip().split('\n')
+            sequenced_lines = []
+            counter = 1
+            for line in lines:
+                if line.strip():
+                    clean_line = re.sub(r'^\d+\.\s*', f"{counter}. ", line.strip())
+                    sequenced_lines.append(clean_line)
+                    counter += 1
+            updated_diary = '\n'.join(sequenced_lines)
+            
             save_global_diary(channel_id, updated_diary)
             print(f"Appended to facts for {channel_id}: {new_facts}")
             
@@ -473,7 +486,7 @@ You have TWO separate databases: [FACTS] and [FEELINGS].
 You must output both sections in your response, followed by a [CHANGELOG] at the very end.
 
 [FACTS]
-This section uses a Degradation Cycle: [Useless (1)] -> [Useless (0)] -> Deleted.
+This section uses a Degradation Cycle: [Useless (1)] -> [Useless (0)] -> COMPLETELY ERASED.
 1. PRESERVE FORMATTING: Every numbered fact you output MUST start with a valid classification tag ([Useless (1)], [Useless (0)], [Normal], or [Core Memory])! Do NOT output facts without a tag!
 2. FREE WILL REEVALUATION: You must autonomously evaluate how important each memory is to YOU based on past experiences and your interactions with the user. Use the current tag as a baseline, but you have complete free will to reasonably upgrade or downgrade ANY memory to ANY class! If a [Normal] memory feels annoying or irrelevant now, downgrade it to [Useless (1)]. If a memory is deeply precious, upgrade it to [Core Memory]!
 3. DEGRADATION & OPTIONS: 
@@ -491,7 +504,7 @@ This section uses a Degradation Cycle: [Useless (1)] -> [Useless (0)] -> Deleted
 4. Use bullet points (-).
 5. LENGTH LIMIT: EACH bullet point CAN be a maximum of 75 characters long. Condense any run-on paragraphs!
 CRITICAL FORMATTING RULES:
-- NEVER write `// Deleted` or ANY code comments in the diary! If an entry is deleted, completely erase the line from existence.
+- ABSOLUTELY NO "[Deleted]" TAGS: If you decide to delete a memory, DO NOT write `[Deleted]`, `// Deleted`, or append `(Degraded)` to it! Just completely, physically erase the line from your output so it no longer exists!
 - Keep the exact same numbering for the [FACTS] you keep. Do NOT renumber them!
 
 Your Current Global Information Diary (FACTS):
@@ -530,6 +543,17 @@ AT THE VERY END, you MUST output a [CHANGELOG] detailing exactly what you change
             logf.write(changelog + "\n")
             
         if new_facts:
+            # Re-sequence numbering cleanly
+            lines = new_facts.strip().split('\n')
+            sequenced_lines = []
+            counter = 1
+            for line in lines:
+                if line.strip():
+                    clean_line = re.sub(r'^\d+\.\s*', f"{counter}. ", line.strip())
+                    sequenced_lines.append(clean_line)
+                    counter += 1
+            new_facts = '\n'.join(sequenced_lines)
+            
             save_global_diary(channel_id, new_facts)
         if new_feelings:
             save_global_feelings(channel_id, new_feelings)
