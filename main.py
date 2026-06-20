@@ -1528,8 +1528,14 @@ async def diary(interaction: discord.Interaction, database: str = "facts"):
         empty_msg = "I don't have any feelings right now! Stop snooping!!"
         
     if diary_entries:
-        embed = discord.Embed(title=title, description=f"```yaml\n{diary_entries}\n```", color=0xFF69B4)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        chunks = [diary_entries[i:i+3900] for i in range(0, len(diary_entries), 3900)]
+        for i, chunk in enumerate(chunks):
+            embed_title = f"{title} (Part {i+1})" if len(chunks) > 1 else title
+            embed = discord.Embed(title=embed_title, description=f"```yaml\n{chunk}\n```", color=0xFF69B4)
+            if i == 0:
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+            else:
+                await interaction.followup.send(embed=embed, ephemeral=True)
     else:
         await interaction.response.send_message(empty_msg, ephemeral=True)
 
